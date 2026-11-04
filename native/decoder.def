@@ -1,0 +1,7 @@
+LIBRARY mjxl_decoder.ax
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE
+    DllRegisterServer PRIVATE
+    DllUnregisterServer PRIVATE
+    MJXLDecodedFrames

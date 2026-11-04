@@ -1,0 +1,17 @@
+samples/
+results/
+__pycache__/
+*.pyc
+_deps/
+_build/
+dist/
+*.user
+
+.vs/
+x64/
+# 원본 및 변환 영상은 버전 관리에서 제외한다.
+*.mov
+*.avi
+*.mkv
+*.mp4
+*.mjxl-lab
