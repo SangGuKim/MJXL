@@ -49,6 +49,19 @@ Provide your own input video. Output files are not overwritten. `encode` accepts
 
 The current native writer supports constant-frame-rate video, up to one audio stream, and classic AVI files smaller than 2 GiB. OpenDML and large-file streaming are not implemented. Windows Media Foundation stalls when reading FLAC inside AVI, so do not use `--flac` for that playback path.
 
+### FFmpeg and ffplay on Linux
+
+An FFmpeg build with the `libjxl` decoder can read MJXL AVI without a custom codec plugin. Ubuntu 24.04's FFmpeg 6.1.1 includes this decoder. Check other builds with `ffmpeg -decoders`. The experimental `MJXL` FourCC is not automatically recognized by the tested build, so force the input video decoder:
+
+```bash
+sudo apt install ffmpeg
+# Playback (requires a working display and audio session).
+ffplay -vcodec libjxl output.avi
+# Decode every video and audio frame without displaying it.
+ffmpeg -v error -xerror -c:v libjxl -i output.avi -map 0:v:0 -map 0:a:0 -f null -
+```
+
+Use `-vcodec libjxl` for ffplay and put FFmpeg's `-c:v libjxl` before `-i`. For silent files, omit the audio map or use `-map '0:a:0?'`. Both PCM and FLAC audio have been tested. All 14 Linux test AVIs decoded successfully. ffplay reached the end of a short PCM and FLAC sample using SDL dummy video/audio outputs; visible Linux playback and listening were not checked. These commands decode pixels for playback or transcoding; use `mjxl restore-original` for exact original-file recovery.
 ## Python preservation experiments
 
 The remainder of this document describes the Python research tools, which reversibly compress MJPEG packets and reconstruct the entire original MOV file. For the native converter and DirectShow decoder built with VS2026, see the native guide linked above. `MJXL.sln` in the repository root is the VS2026 solution.

@@ -112,3 +112,7 @@ WSL2 Ubuntu 24.04 x86-64에 libjxl-dev, libbrotli-dev, libavformat-dev 등 필�
 native/validate_cli.py로 7개 샘플의 PCM·FLAC 총 14개 변환과 verify, restore-original을 실행했다. 매 복원 파일의 SHA-256이 원본과 일치했다. 각 모드의 영상은 총 1,332프레임이며 검증 보고서는 results/linux-validation/cli-report.json에 저장했다. 첫 FLAC 파일의 MJPEG AVI 복원과 RGB 디코딩도 통과했다. Windows에서 만든 FLAC MJXL AVI를 Linux에서 verify·원본 복원했고, Linux에서 만든 첫 FLAC AVI도 Windows CLI의 verify를 통과했다. 전체 파일 조합이나 Linux 플레이어 재생까지 검증한 것은 아니다.
 
 Linux 빌드·사용법을 영문 README와 네이티브 문서에 추가했다. 실행 파일은 dist/linux/mjxl이며 Git에서 제외한다. 배포판별 공유 라이브러리에 의존하므로 모든 Linux 배포판에 통용되는 단일 바이너리로 간주하지 않는다.
+
+## Linux FFmpeg·ffplay 경로: 2026-11-05
+
+Ubuntu 24.04의 FFmpeg 6.1.1 패키지를 설치했다. 포함된 libjxl 디코더를 입력 옵션으로 지정하여 Linux 변환 샘플 7개씩 PCM·FLAC 총 14개 AVI의 영상과 음성 전체를 오류 없이 디코딩했다. 각 모드 1,332프레임이며 보고서는 results/linux-validation/ffmpeg-report.json에 남긴다. ffplay도 -vcodec libjxl로 SDL 더미 영상·음성 출력에서 첫 PCM·FLAC 샘플의 끝까지 정상 종료했다. 실제 Linux 화면 표시·음성 청취나 탐색은 검증하지 않았다. FFmpeg 소스의 MJXL FourCC 매핑과 GStreamer 지원은 변경하지 않았다. 영문 README와 네이티브 문서에 명령과 검증 범위를 추가했다.

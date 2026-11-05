@@ -99,6 +99,15 @@ DirectShow 디코더는 JXL을 RGB24로 직접 디코딩한다. JPEG 복원 뒤 
 
 이 명령은 실제 픽셀·음성 디코딩 검사이다. 일반 FFmpeg 인코더로 MJPEG를 픽셀로 푼 뒤 JXL을 생성하는 것은 이 도구의 JPEG 가역 재압축과 다르다. JPEG 패킷 보존 변환은 `mjxl.exe encode`를 사용한다.
 
+Linux에서도 libjxl 디코더가 포함된 FFmpeg 빌드를 사용하면 별도 플러그인 없이 읽을 수 있다. Ubuntu 24.04의 FFmpeg 6.1.1 패키지로 확인했다. 다른 빌드에서는 `ffmpeg -decoders`에 `libjxl`이 있는지 확인한다.
+
+```bash
+sudo apt install ffmpeg
+ffplay -vcodec libjxl output.avi
+ffmpeg -v error -xerror -c:v libjxl -i output.avi -map 0:v:0 -map 0:a:0 -f null -
+```
+
+ffplay에는 `-vcodec libjxl`을 쓰고 FFmpeg에는 `-i` 앞에 `-c:v libjxl`을 지정한다. 음성이 없는 파일은 음성 매핑을 빼거나 `-map '0:a:0?'`로 바꾼다. 7개 샘플의 PCM·FLAC 총 14개 AVI에서 영상·음성 전체 디코딩을 통과했다. ffplay는 SDL 더미 영상·음성 출력으로 짧은 PCM·FLAC 파일의 종료까지 확인했다. Linux에서 실제 화면 표시와 청취는 검증하지 않았다. 원본 파일 전체 복원은 이 명령이 아니라 `mjxl restore-original`을 사용한다. FourCC 자동 매핑이나 GStreamer 플러그인은 추가하지 않았다.
 ## 첫 버전의 범위
 
 - 고정 프레임 레이트, 영상 한 개, 음성 최대 한 개를 지원한다.
