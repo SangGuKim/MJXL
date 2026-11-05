@@ -5,8 +5,8 @@
 ## 현재 구현
 
 - Python 연구 도구는 JPEG 패킷과 나머지 MOV 구간을 보존하여 원본 MOV 전체 바이트를 복원한다.
-- 네이티브 도구는 libjxl의 JPEG 가역 재압축으로 독립 JXL 프레임을 만들고 MJXL FourCC의 AVI에 저장한다. 8/16/24비트 PCM은 기본적으로 FLAC으로 무손실 압축하고, 32비트 PCM과 `--pcm` 지정 시에는 PCM을 그대로 복사한다.
-- 네이티브 restore는 JPEG와 PCM을 MJPEG AVI로 복원한다. 원본 MOV 메타데이터와 파일 배치는 복원하지 않는다.
+- 네이티브 도구는 libjxl의 JPEG 가역 재압축으로 독립 JXL 프레임을 만들고 MJXL FourCC의 AVI에 저장한다. PCM은 기본적으로 그대로 복사하고, `--flac` 지정 시 8/16/24비트 PCM을 FLAC으로 무손실 압축한다. 32비트 PCM은 항상 PCM으로 둔다.
+- 네이티브 restore-original은 원본 파일 전체를 바이트 단위로 복원한다. restore는 JPEG와 PCM을 MJPEG AVI로 만들며 원본 컨테이너를 재현하지 않는다.
 - DirectShow 필터는 JXL을 RGB24로 직접 디코딩한다. CLI, 필터 및 그래프 검사 실행 파일이 dist/Release에 남아 있다.
 
 ## 기존 검증 기록
@@ -65,7 +65,7 @@ mjxl_mft_test에 스트라이드 세 경우와 드레인 재개 검사를 추가
 
 ## FLAC 음성 저장: 2026-11-05
 
-mjxl encode의 기본 음성 저장을 FLAC으로 바꿨다. FFmpeg FLAC 인코더는 s16과 s32만 받으므로 8비트 PCM은 상위 바이트에 옮긴 16비트 FLAC으로 저장한다. 원래 PCM 비트는 hdrl 안의 mjxa 청크에 기록하며, 이 청크가 없는 FLAC AVI는 복원을 거부한다. libFLAC을 쓰면 8비트 그대로 저장할 수 있으나 외부 의존성 추가를 보류했다. 32비트 PCM은 PCM으로 유지한다.
+mjxl encode에 FLAC 음성 저장을 추가했다. 절감이 작아 사용자 요청에 따라 기본값은 PCM으로 두고 `--flac`으로 켠다. FFmpeg FLAC 인코더는 s16과 s32만 받으므로 8비트 PCM은 상위 바이트에 옮긴 16비트 FLAC으로 저장한다. 원래 PCM 비트는 hdrl 안의 mjxa 청크에 기록하며, 이 청크가 없는 FLAC AVI는 복원을 거부한다. libFLAC을 쓰면 8비트 그대로 저장할 수 있으나 외부 의존성 추가를 보류했다. 32비트 PCM은 PCM으로 유지한다.
 
 7개 샘플 합계는 PCM AVI 52,374,566바이트에서 FLAC AVI 52,183,508바이트로 191,058바이트(0.365%) 줄었다. 원본 대비 절감률은 13.62%에서 13.93%가 되었다. 블록 크기는 FFmpeg 기본값이 아니라 16kHz 이하 2048, 그 위 4096 표본을 사용한다.
 
@@ -75,4 +75,16 @@ Windows AVI Splitter는 nBlockAlign이 프레임당 표본 수가 아니면 FLAC
 
 팟플레이어에서 FLAC AVI의 영상 표시, 디코더 로드와 음성 세션 신호를 확인했다. 시스템 음소거 상태에서 측정했으므로 귀로 들은 음질과 영상 싱크는 미확인이다. FLAC과 PCM의 세션 피크는 시간대별로 일치하고 FLAC이 약 0.75% 높다. 파일 표본은 전부 (u8-128)×256과 일치하므로 파일의 스케일링은 아니다. 이전에 보인 큰 피크 차이는 폴더의 다음 영상까지 재생된 측정 오류였다. 탐색기 썸네일도 새 파일에서 생성되었다.
 
-Windows Media Foundation의 AVI 소스는 AVI 안의 FLAC을 읽을 때 멈춘다. Source Reader의 음성 읽기와 Media Engine 재생이 모두 멈추고 FFmpeg가 만든 FLAC AVI에서도 같다. 같은 음성과 영상의 MKV는 Media Engine 재생과 썸네일을 통과했다. Media Foundation 경로에는 --pcm AVI 또는 MKV를 사용해야 한다. MKV 출력은 구현하지 않았다.
+Windows Media Foundation의 AVI 소스는 AVI 안의 FLAC을 읽을 때 멈춘다. Source Reader의 음성 읽기와 Media Engine 재생이 모두 멈추고 FFmpeg가 만든 FLAC AVI에서도 같다. 같은 음성과 영상의 MKV는 Media Engine 재생과 썸네일을 통과했다. Media Foundation 경로에는 PCM AVI 또는 MKV를 사용해야 한다. MKV 출력은 구현하지 않았다.
+
+## 원본 파일 복원: 2026-11-05
+
+mjxl encode가 영상·음성 패킷을 뺀 나머지 원본 바이트, 패킷 배치와 SHA-256을 AVI 끝의 mjxo 청크에 저장한다. 나머지 바이트와 배치는 libjxl이 이미 포함하는 Brotli로 압축한다. restore-original은 저장된 패킷과 이 청크로 원본을 재구성하고 해시를 검사한다.
+
+7개 샘플 모두 PCM과 --flac 저장에서 복원 파일이 원본과 SHA-256으로 일치했다. 합계 비용은 35,882바이트이고 PCM AVI 합계는 52,410,448바이트로 원본 대비 13.56% 절감이다. --flac은 52,219,390바이트로 13.87%이다. 연구용 아카이브의 13.48%보다 작다.
+
+앞부분 moov, 추가 메타데이터, 조각 MOV, 음성 없는 MOV, 파일 끝 추가 바이트, AVI 입력, 16·24·32비트 PCM에서도 바이트 일치를 확인했다. 청크의 버전·크기·해시·표·나머지 바이트 손상, 과대한 크기와 패킷 수, 잘린 파일, 손상된 영상 프레임을 거부하고 출력을 남기지 않음을 확인했다.
+
+mjxo 청크를 포함한 AVI는 FFmpeg, Windows DirectShow 자동 그래프, Media Foundation 검사와 Media Engine 재생, 팟플레이어, 새 썸네일 생성에서 정상이다. 복원 정보를 만들 수 없으면 encode가 실패하며 --no-original로만 생략할 수 있다. verify는 이 청크가 없으면 --no-original 없이는 실패한다. 이전에 만든 AVI에는 이 청크가 없어 원본을 복원할 수 없다. 원본을 지우기 전에는 새로 인코딩한 파일을 verify로 확인해야 한다.
+
+음성 없는 입력에서 FLAC 구현 때 들어간 0으로 나누기 오류가 발견되어 수정했다. 이 오류는 커밋 8e6c14f에 포함되어 있었다.

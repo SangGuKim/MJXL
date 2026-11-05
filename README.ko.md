@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축하여 저장 공간을 줄이는 Windows 실험 프로젝트이다. 네이티브 도구는 JPEG·PCM 바이트를 복원할 수 있는 MJXL AVI를 생성하고 DirectShow 필터로 재생한다. PCM은 기본적으로 FLAC으로 무손실 압축한다. 네이티브 AVI에서 원래 MOV 컨테이너 전체를 복원하는 것은 지원하지 않는다.
+MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축하여 저장 공간을 줄이는 Windows 실험 프로젝트이다. 네이티브 도구는 원본 파일 전체를 바이트 단위로 복원할 수 있는 MJXL AVI를 생성하고 DirectShow 필터로 재생한다. PCM은 기본적으로 그대로 복사하며 `--flac`으로 무손실 압축할 수 있다.
 
 - 변환·재생·빌드: [네이티브 사용 방법](native/README.md)
 - 검증 범위와 작업 기록: [STATUS.md](STATUS.md)

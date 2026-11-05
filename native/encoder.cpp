@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "flac_audio.hpp"
+#include "original_file.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
@@ -27,6 +28,7 @@ constexpr uint32_t kAudioMetadataVersion = 1;
 struct Packet {
     bool video;
     std::vector<uint8_t> bytes;
+    int64_t position;
 };
 struct Movie {
     // FLAC AVI에서도 bits는 저장 비트가 아니라 복원할 원래 PCM 비트이다.
@@ -149,7 +151,7 @@ static Movie read_movie(const fs::path& path)
                     ++frame;
                 }
                 check(p->size > 0 && p->size < 256 * 1024 * 1024, "Invalid packet size");
-                movie.packets.push_back({isVideo, {p->data, p->data + p->size}});
+                movie.packets.push_back({isVideo, {p->data, p->data + p->size}, p->pos});
             }
             av_packet_unref(p);
         }
@@ -293,11 +295,17 @@ public:
             samples_ += static_cast<uint32_t>(data.size() / blockAlign_);
         }
     }
-    void finish()
+    void finish(std::span<const uint8_t> original = {})
     {
         finish_list(movi_);
         tag("idx1"); u32(static_cast<uint32_t>(index_.size() * sizeof(Entry)));
         bytes(index_.data(), index_.size() * sizeof(Entry));
+        if (!original.empty()) {
+            // 재생기가 건너뛰도록 원본 복원 정보를 RIFF 끝의 별도 청크에 둔다.
+            tag("mjxo"); u32(static_cast<uint32_t>(original.size()));
+            bytes(original.data(), original.size());
+            if (original.size() & 1) { const char zero = 0; bytes(&zero, 1); }
+        }
         patch(frameCountPos_, frames_); patch(videoLengthPos_, frames_);
         if (audioLengthPos_) { patch(audioLengthPos_, samples_); }
         patch(4, static_cast<uint32_t>(position() - 8));
@@ -345,24 +353,105 @@ static void verify(const Movie& source, const fs::path& encoded, const mjxl::Cod
     std::cout << "Verified " << originalFrames.size() << " exact JPEG frames and " << originalAudio.size() << " exact PCM bytes\n";
 }
 
+static std::vector<uint8_t> read_file(const fs::path& path)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    check(bool(file), "Cannot open file");
+    const auto size = static_cast<std::streamoff>(file.tellg());
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    file.seekg(0);
+    if (size) { file.read(reinterpret_cast<char*>(bytes.data()), size); }
+    check(bool(file), "Cannot read file");
+    return bytes;
+}
+
+// RIFF 최상위에서 mjxo 청크를 찾는다. 없으면 빈 값을 돌려준다.
+static std::vector<uint8_t> read_original_chunk(const fs::path& path)
+{
+    const auto total = fs::file_size(path);
+    std::ifstream file(path, std::ios::binary);
+    char header[12]{};
+    file.read(header, sizeof(header));
+    check(file && std::memcmp(header, "RIFF", 4) == 0, "Original data is only supported in AVI");
+    uint64_t position = sizeof(header);
+    while (position + 8 <= total) {
+        char tag[4]{};
+        uint32_t size = 0;
+        file.seekg(static_cast<std::streamoff>(position));
+        file.read(tag, 4);
+        file.read(reinterpret_cast<char*>(&size), sizeof(size));
+        check(bool(file), "Cannot read AVI chunk");
+        if (std::memcmp(tag, "mjxo", 4) == 0) {
+            check(size <= total - position - 8, "Truncated original data chunk");
+            std::vector<uint8_t> payload(size);
+            file.read(reinterpret_cast<char*>(payload.data()), size);
+            check(bool(file), "Cannot read original data chunk");
+            return payload;
+        }
+        position += 8 + uint64_t(size) + (size & 1);
+    }
+    return {};
+}
+
+// 원본을 복원할 수 없는 출력을 조용히 만들지 않도록 복원 정보를 만들지 못하면 인코딩을 중단한다.
+static std::vector<uint8_t> make_original_data(const Movie& movie, std::span<const uint8_t> file)
+{
+    constexpr auto hint = "; the original file could not be restored. Use --no-original to encode without it";
+    std::vector<mjxl::OriginalPacket> packets;
+    packets.reserve(movie.packets.size());
+    for (const auto& p : movie.packets) {
+        const bool found = p.position >= 0 && uint64_t(p.position) <= file.size() && p.bytes.size() <= file.size() - uint64_t(p.position) &&
+                           std::equal(p.bytes.begin(), p.bytes.end(), file.begin() + static_cast<ptrdiff_t>(p.position));
+        if (!found) {
+            throw std::runtime_error(std::string("Media packets differ from the input file") + hint);
+        }
+        packets.push_back({p.video, static_cast<uint64_t>(p.position), static_cast<uint32_t>(p.bytes.size())});
+    }
+    try {
+        return mjxl::pack_original(file, packets);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(error.what() + std::string(hint));
+    }
+}
+
+// 인코딩된 AVI만으로 원본 파일 전체를 다시 만든다.
+static std::vector<uint8_t> rebuild_from_avi(const Movie& encoded, std::span<const uint8_t> payload, const mjxl::Codec& codec)
+{
+    std::vector<std::vector<uint8_t>> frames;
+    for (const auto& p : encoded.packets) {
+        if (p.video) { frames.push_back(codec.jpeg(p.bytes)); }
+    }
+    return mjxl::rebuild_original(payload, frames, pcm_of(encoded));
+}
+
 int wmain(int argc, wchar_t** argv)
 {
     SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8); av_log_set_level(AV_LOG_ERROR);
     try {
-        check(argc >= 3, "Usage: mjxl encode input.mov output.avi [--pcm] | restore encoded.avi mjpeg.avi | verify original.mov encoded.avi | bench encoded.avi");
+        check(argc >= 3, "Usage: mjxl encode input.mov output.avi [--flac] [--no-original] | restore encoded.avi mjpeg.avi | restore-original encoded.avi original.mov | verify original.mov encoded.avi [--no-original] | bench encoded.avi");
         const std::wstring command = argv[1];
         const auto movie = read_movie(argv[2]);
         mjxl::Codec codec;
         if (command == L"encode") {
-            const bool keepPcm = argc == 5 && std::wstring(argv[4]) == L"--pcm";
-            check((argc == 4 || keepPcm) && !movie.jxl, "encode requires an MJPEG input and an AVI output");
+            bool wantFlac = false, keepOriginal = true;
+            for (int i = 4; i < argc; ++i) {
+                const std::wstring option = argv[i];
+                if (option == L"--flac") {
+                    wantFlac = true;
+                } else if (option == L"--no-original") {
+                    keepOriginal = false;
+                } else {
+                    throw std::runtime_error("Unknown encode option");
+                }
+            }
+            check(argc >= 4 && !movie.jxl, "encode requires an MJPEG input and an AVI output");
             const fs::path output(argv[3]);
             check(!fs::exists(output), "Output already exists");
             auto partial = output; partial += L".partial";
             const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate};
             const auto pcm = pcm_of(movie);
             std::optional<mjxl::FlacStream> flac;
-            if (!keepPcm && !pcm.empty() && mjxl::flac_supported(format)) {
+            if (wantFlac && !pcm.empty() && mjxl::flac_supported(format)) {
                 flac = mjxl::flac_encode(pcm, format);
                 // 파일을 쓰기 전에 FLAC가 원래 PCM으로 되돌아오는지 확인한다.
                 mjxl::FlacDecoder decoder(flac->streamInfo, format);
@@ -375,8 +464,13 @@ int wmain(int argc, wchar_t** argv)
                 restored.insert(restored.end(), rest.begin(), rest.end());
                 check(restored == pcm, "FLAC round-trip verification failed");
                 std::cout << "Audio FLAC: " << pcm.size() << " PCM bytes stored as " << flac->storedBits << "-bit FLAC\n";
-            } else if (!pcm.empty()) {
-                std::cout << "Audio stays PCM: " << pcm.size() << " bytes\n";
+            } else if (wantFlac && !pcm.empty()) {
+                std::cout << "Audio stays PCM because FLAC cannot store it: " << pcm.size() << " bytes\n";
+            }
+            const auto sourceFile = read_file(argv[2]);
+            const auto originalData = keepOriginal ? make_original_data(movie, sourceFile) : std::vector<uint8_t>{};
+            if (!keepOriginal) {
+                std::cout << "WARNING: This output cannot restore the original file; keep the original\n";
             }
             AviWriter writer(partial, movie, MJXL, flac ? &*flac : nullptr);
             unsigned frames = 0;
@@ -401,9 +495,18 @@ int wmain(int argc, wchar_t** argv)
                     writer.packet(false, p.bytes);
                 }
             }
-            write_audio_until(INT64_MAX / (int64_t(movie.fps.den) * movie.sampleRate));
-            writer.finish();
+            if (flac) {
+                // 마지막 영상 프레임 뒤에 남은 음성을 모두 기록한다.
+                write_audio_until(INT64_MAX / (int64_t(movie.fps.den) * movie.sampleRate));
+            }
+            writer.finish(originalData);
             verify(movie, partial, codec);
+            if (!originalData.empty()) {
+                // 이름을 확정하기 전에 저장된 AVI만으로 원본 전체가 복원되는지 확인한다.
+                const auto stored = read_original_chunk(partial);
+                check(rebuild_from_avi(read_movie(partial), stored, codec) == sourceFile, "Original file verification failed");
+                std::cout << "Verified exact original file: " << sourceFile.size() << " bytes, stored " << originalData.size() << " bytes of container data\n";
+            }
             fs::rename(partial, output);
             std::cout << "Saved " << fs::file_size(output) << " bytes: " << utf8(output) << '\n';
         } else if (command == L"restore") {
@@ -435,9 +538,36 @@ int wmain(int argc, wchar_t** argv)
             verify(movie, partial, codec, false);
             fs::rename(partial, output);
             std::cout << "Restored exact JPEG packets and PCM samples to " << utf8(output) << '\n';
+        } else if (command == L"restore-original") {
+            check(argc == 4 && movie.jxl, "restore-original requires an MJXL AVI input and an output path");
+            const fs::path output(argv[3]);
+            check(!fs::exists(output), "Output already exists");
+            auto partial = output; partial += L".partial";
+            check(!fs::exists(partial), "Partial output already exists");
+            const auto stored = read_original_chunk(argv[2]);
+            check(!stored.empty(), "This AVI holds no original file data; encode it again from the original file");
+            const auto rebuilt = rebuild_from_avi(movie, stored, codec);
+            {
+                std::ofstream file(partial, std::ios::binary);
+                file.write(reinterpret_cast<const char*>(rebuilt.data()), static_cast<std::streamsize>(rebuilt.size()));
+                check(bool(file), "Cannot write restored file");
+            }
+            check(read_file(partial) == rebuilt, "Restored file verification failed");
+            fs::rename(partial, output);
+            std::cout << "Restored exact original file (SHA-256 verified): " << rebuilt.size() << " bytes to " << utf8(output) << '\n';
         } else if (command == L"verify") {
-            check(argc == 4, "verify requires original and encoded paths");
+            const bool allowMissing = argc == 5 && std::wstring(argv[4]) == L"--no-original";
+            check(argc == 4 || allowMissing, "verify requires original and encoded paths and optionally --no-original");
             verify(movie, argv[3], codec);
+            const auto stored = read_original_chunk(argv[3]);
+            if (stored.empty()) {
+                // 이 검사를 원본 삭제의 근거로 쓰므로 복원할 수 없는 파일은 실패로 처리한다.
+                check(allowMissing, "This AVI holds no original file data, so the original file cannot be restored from it");
+                std::cout << "WARNING: This AVI holds no original file data; keep the original\n";
+            } else {
+                check(rebuild_from_avi(read_movie(argv[3]), stored, codec) == read_file(argv[2]), "Original file verification failed");
+                std::cout << "Verified exact original file\n";
+            }
         } else if (command == L"bench") {
             check(movie.jxl, "bench requires an MJXL AVI");
             const auto start = std::chrono::steady_clock::now();
