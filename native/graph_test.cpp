@@ -46,7 +46,7 @@ static ComPtr<IPin> pin(IBaseFilter* filter, PIN_DIRECTION direction, bool video
 int wmain(int argc, wchar_t** argv)
 {
     SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8);
-    if (argc != 3) { std::cerr << "Usage: mjxl_graph_test decoder.ax video.avi\n"; return 1; }
+    if (argc != 3 && argc != 4) { std::cerr << "Usage: mjxl_graph_test decoder.ax video.avi [--registered|--auto]\n"; return 1; }
     check(CoInitializeEx(nullptr, COINIT_MULTITHREADED), "CoInitializeEx");
     HMODULE module = nullptr;
     int exitCode = 0;
@@ -62,29 +62,41 @@ int wmain(int argc, wchar_t** argv)
         ComPtr<IClassFactory> factory;
         check(create(kMjxlDecoder, IID_PPV_ARGS(&factory)), "GetClassObject");
         ComPtr<IBaseFilter> decoder;
-        check(factory->CreateInstance(nullptr, IID_PPV_ARGS(&decoder)), "Create decoder");
+        if (argc == 4) {
+            if (std::wstring(argv[3]) != L"--registered" && std::wstring(argv[3]) != L"--auto") {
+                throw std::runtime_error("Unknown graph test option");
+            }
+            check(CoCreateInstance(kMjxlDecoder, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&decoder)), "Create registered decoder");
+        } else {
+            check(factory->CreateInstance(nullptr, IID_PPV_ARGS(&decoder)), "Create decoder");
+        }
         ComPtr<IGraphBuilder> graph;
         check(CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&graph)), "Create graph");
-        ComPtr<IBaseFilter> source, splitter, sink;
-        check(CoCreateInstance(CLSID_AsyncReader, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&source)), "Create file source");
-        ComPtr<IFileSourceFilter> loader;
-        check(source.As(&loader), "File source interface");
-        check(loader->Load(std::filesystem::absolute(argv[2]).c_str(), nullptr), "Load AVI");
-        check(CoCreateInstance(CLSID_AviSplitter, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&splitter)), "Create AVI splitter");
-        check(CoCreateInstance(kNullRenderer, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&sink)), "Create null renderer");
-        check(graph->AddFilter(source.Get(), L"File"), "Add source");
-        check(graph->AddFilter(splitter.Get(), L"AVI Splitter"), "Add splitter");
-        check(graph->AddFilter(decoder.Get(), L"MJXL Decoder"), "Add decoder");
-        check(graph->AddFilter(sink.Get(), L"Null Renderer"), "Add renderer");
-        check(graph->ConnectDirect(pin(source.Get(), PINDIR_OUTPUT).Get(), pin(splitter.Get(), PINDIR_INPUT).Get(), nullptr), "Connect AVI source");
-        check(graph->ConnectDirect(pin(splitter.Get(), PINDIR_OUTPUT, true).Get(), pin(decoder.Get(), PINDIR_INPUT).Get(), nullptr), "Connect MJXL input");
-        check(graph->ConnectDirect(pin(decoder.Get(), PINDIR_OUTPUT).Get(), pin(sink.Get(), PINDIR_INPUT).Get(), nullptr), "Connect RGB renderer");
-        auto audioPin = pin(splitter.Get(), PINDIR_OUTPUT, false, true);
-        ComPtr<IBaseFilter> audioSink;
-        if (audioPin) {
-            check(CoCreateInstance(kNullRenderer, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&audioSink)), "Create audio null renderer");
-            check(graph->AddFilter(audioSink.Get(), L"Audio Null Renderer"), "Add audio renderer");
-            check(graph->ConnectDirect(audioPin.Get(), pin(audioSink.Get(), PINDIR_INPUT).Get(), nullptr), "Connect PCM renderer");
+        const bool automatic = argc == 4 && std::wstring(argv[3]) == L"--auto";
+        if (automatic) {
+            check(graph->RenderFile(std::filesystem::absolute(argv[2]).c_str(), nullptr), "Automatic registered graph");
+        } else {
+            ComPtr<IBaseFilter> source, splitter, sink;
+            check(CoCreateInstance(CLSID_AsyncReader, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&source)), "Create file source");
+            ComPtr<IFileSourceFilter> loader;
+            check(source.As(&loader), "File source interface");
+            check(loader->Load(std::filesystem::absolute(argv[2]).c_str(), nullptr), "Load AVI");
+            check(CoCreateInstance(CLSID_AviSplitter, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&splitter)), "Create AVI splitter");
+            check(CoCreateInstance(kNullRenderer, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&sink)), "Create null renderer");
+            check(graph->AddFilter(source.Get(), L"File"), "Add source");
+            check(graph->AddFilter(splitter.Get(), L"AVI Splitter"), "Add splitter");
+            check(graph->AddFilter(decoder.Get(), L"MJXL Decoder"), "Add decoder");
+            check(graph->AddFilter(sink.Get(), L"Null Renderer"), "Add renderer");
+            check(graph->ConnectDirect(pin(source.Get(), PINDIR_OUTPUT).Get(), pin(splitter.Get(), PINDIR_INPUT).Get(), nullptr), "Connect AVI source");
+            check(graph->ConnectDirect(pin(splitter.Get(), PINDIR_OUTPUT, true).Get(), pin(decoder.Get(), PINDIR_INPUT).Get(), nullptr), "Connect MJXL input");
+            check(graph->ConnectDirect(pin(decoder.Get(), PINDIR_OUTPUT).Get(), pin(sink.Get(), PINDIR_INPUT).Get(), nullptr), "Connect RGB renderer");
+            auto audioPin = pin(splitter.Get(), PINDIR_OUTPUT, false, true);
+            ComPtr<IBaseFilter> audioSink;
+            if (audioPin) {
+                check(CoCreateInstance(kNullRenderer, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&audioSink)), "Create audio null renderer");
+                check(graph->AddFilter(audioSink.Get(), L"Audio Null Renderer"), "Add audio renderer");
+                check(graph->ConnectDirect(audioPin.Get(), pin(audioSink.Get(), PINDIR_INPUT).Get(), nullptr), "Connect PCM renderer");
+            }
         }
         ComPtr<IMediaFilter> clock;
         check(graph.As(&clock), "Clock interface");
