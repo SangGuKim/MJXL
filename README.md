@@ -24,11 +24,13 @@ Set `FFMPEG_SDK` to your FFmpeg SDK directory, then run the following commands f
 .\dist\Release\mjxl.exe restore-original .\results\output.avi .\results\restored.mov
 .\dist\Release\mjxl.exe restore .\results\output.avi .\results\restored-mjpeg.avi
 
-# Register the DirectShow decoder for the current user.
-.\native\register.ps1
+# Copy the decoder and tools to %LOCALAPPDATA%\MJXL and register the decoder for the current user.
+.\native\install.cmd
 ```
 
-Provide your own input video. Output files are not overwritten. `restore-original` recreates the original file and checks its SHA-256 hash. `restore` instead builds an MJPEG AVI from the preserved JPEG packets. `verify` compares the rebuilt file with the original, so run it before deleting an original. `encode` fails if it cannot store the data needed for `restore-original`; add `--no-original` to skip it. Files made that way or by earlier versions cannot restore the original file. PotPlayer playback has been verified on the development PC. VLC does not use this DirectShow decoder.
+On Linux, install FFmpeg, libjxl, and Brotli development packages and run `make -C native` to build `dist/linux/mjxl`. The DirectShow filter and the Media Foundation decoder are Windows only.
+
+Provide your own input video. Output files are not overwritten. `encode` accepts `-e 1-10` or `--effort 1-10` to set the JXL effort; the default is 7. Options follow the command and may appear in any order after it. Run `mjxl --help` or `mjxl encode --help` for details. `restore-original` recreates the original file and checks its SHA-256 hash. `restore` instead builds an MJPEG AVI from the preserved JPEG packets. `verify` compares the rebuilt file with the original, so run it before deleting an original. `encode` fails if it cannot store the data needed for `restore-original`; add `--no-original` to skip it. Files made that way or by earlier versions cannot restore the original file. PotPlayer playback has been verified on the development PC. VLC does not use this DirectShow decoder.
 
 The current native writer supports constant-frame-rate video, up to one audio stream, and classic AVI files smaller than 2 GiB. OpenDML and large-file streaming are not implemented. Windows Media Foundation stalls when reading FLAC inside AVI, so do not use `--flac` for that playback path.
 

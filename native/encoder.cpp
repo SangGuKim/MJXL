@@ -1,17 +1,26 @@
+#include "cli.hpp"
 #include "core.hpp"
 #include "flac_audio.hpp"
 #include "original_file.hpp"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/log.h>
@@ -424,30 +433,34 @@ static std::vector<uint8_t> rebuild_from_avi(const Movie& encoded, std::span<con
     return mjxl::rebuild_original(payload, frames, pcm_of(encoded));
 }
 
-int wmain(int argc, wchar_t** argv)
+// 내부 문자열은 UTF-8이므로 경로로 바꿀 때 플랫폼 인코딩에 맡기지 않는다.
+static fs::path to_path(const std::string& text)
 {
-    SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8); av_log_set_level(AV_LOG_ERROR);
+    return fs::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+}
+
+static int run(const std::vector<std::string>& arguments)
+{
+    av_log_set_level(AV_LOG_ERROR);
     try {
-        check(argc >= 3, "Usage: mjxl encode input.mov output.avi [--flac] [--no-original] | restore encoded.avi mjpeg.avi | restore-original encoded.avi original.mov | verify original.mov encoded.avi [--no-original] | bench encoded.avi");
-        const std::wstring command = argv[1];
-        const auto movie = read_movie(argv[2]);
+        const auto cli = mjxl::parse_command_line(arguments);
+        if (cli.help) {
+            std::cout << mjxl::help_text(cli.command);
+            return cli.missingCommand ? 1 : 0;
+        }
+        const auto& command = cli.command;
+        const bool wantFlac = cli.flac, noOriginal = cli.noOriginal;
+        const int effort = cli.effort;
+        const fs::path firstPath = to_path(cli.paths[0]);
+        const fs::path secondPath = cli.paths.size() > 1 ? to_path(cli.paths[1]) : fs::path{};
+        const auto movie = read_movie(firstPath);
         mjxl::Codec codec;
-        if (command == L"encode") {
-            bool wantFlac = false, keepOriginal = true;
-            for (int i = 4; i < argc; ++i) {
-                const std::wstring option = argv[i];
-                if (option == L"--flac") {
-                    wantFlac = true;
-                } else if (option == L"--no-original") {
-                    keepOriginal = false;
-                } else {
-                    throw std::runtime_error("Unknown encode option");
-                }
-            }
-            check(argc >= 4 && !movie.jxl, "encode requires an MJPEG input and an AVI output");
-            const fs::path output(argv[3]);
+        if (command == "encode") {
+            const bool keepOriginal = !noOriginal;
+            check(!movie.jxl, "encode requires an MJPEG input");
+            const fs::path output(secondPath);
             check(!fs::exists(output), "Output already exists");
-            auto partial = output; partial += L".partial";
+            auto partial = output; partial += ".partial";
             const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate};
             const auto pcm = pcm_of(movie);
             std::optional<mjxl::FlacStream> flac;
@@ -467,7 +480,7 @@ int wmain(int argc, wchar_t** argv)
             } else if (wantFlac && !pcm.empty()) {
                 std::cout << "Audio stays PCM because FLAC cannot store it: " << pcm.size() << " bytes\n";
             }
-            const auto sourceFile = read_file(argv[2]);
+            const auto sourceFile = read_file(firstPath);
             const auto originalData = keepOriginal ? make_original_data(movie, sourceFile) : std::vector<uint8_t>{};
             if (!keepOriginal) {
                 std::cout << "WARNING: This output cannot restore the original file; keep the original\n";
@@ -486,7 +499,7 @@ int wmain(int argc, wchar_t** argv)
             for (const auto& p : movie.packets) {
                 if (p.video) {
                     write_audio_until(frames);
-                    const auto encoded = codec.encode(p.bytes);
+                    const auto encoded = codec.encode(p.bytes, effort);
                     check(codec.jpeg(encoded) == p.bytes, "JPEG round-trip verification failed");
                     writer.packet(true, encoded);
                     ++frames;
@@ -508,12 +521,14 @@ int wmain(int argc, wchar_t** argv)
                 std::cout << "Verified exact original file: " << sourceFile.size() << " bytes, stored " << originalData.size() << " bytes of container data\n";
             }
             fs::rename(partial, output);
-            std::cout << "Saved " << fs::file_size(output) << " bytes: " << utf8(output) << '\n';
-        } else if (command == L"restore") {
-            check(argc == 4 && movie.jxl, "restore requires an MJXL AVI input and an MJPEG AVI output");
-            const fs::path output(argv[3]);
+            const auto savedSize = fs::file_size(output);
+            const double reduction = sourceFile.empty() ? 0.0 : 100.0 * (1.0 - static_cast<double>(savedSize) / static_cast<double>(sourceFile.size()));
+            std::cout << "Saved " << savedSize << " bytes (" << std::format("{:.2f}", reduction) << "% smaller than " << sourceFile.size() << " bytes): " << utf8(output) << '\n';
+        } else if (command == "restore") {
+            check(movie.jxl, "restore requires an MJXL AVI input");
+            const fs::path output(secondPath);
             check(!fs::exists(output), "Output already exists");
-            auto partial = output; partial += L".partial";
+            auto partial = output; partial += ".partial";
             AviWriter writer(partial, movie, fourcc('M', 'J', 'P', 'G'));
             std::unique_ptr<mjxl::FlacDecoder> decoder;
             if (movie.flac) {
@@ -538,13 +553,13 @@ int wmain(int argc, wchar_t** argv)
             verify(movie, partial, codec, false);
             fs::rename(partial, output);
             std::cout << "Restored exact JPEG packets and PCM samples to " << utf8(output) << '\n';
-        } else if (command == L"restore-original") {
-            check(argc == 4 && movie.jxl, "restore-original requires an MJXL AVI input and an output path");
-            const fs::path output(argv[3]);
+        } else if (command == "restore-original") {
+            check(movie.jxl, "restore-original requires an MJXL AVI input");
+            const fs::path output(secondPath);
             check(!fs::exists(output), "Output already exists");
-            auto partial = output; partial += L".partial";
+            auto partial = output; partial += ".partial";
             check(!fs::exists(partial), "Partial output already exists");
-            const auto stored = read_original_chunk(argv[2]);
+            const auto stored = read_original_chunk(firstPath);
             check(!stored.empty(), "This AVI holds no original file data; encode it again from the original file");
             const auto rebuilt = rebuild_from_avi(movie, stored, codec);
             {
@@ -555,20 +570,18 @@ int wmain(int argc, wchar_t** argv)
             check(read_file(partial) == rebuilt, "Restored file verification failed");
             fs::rename(partial, output);
             std::cout << "Restored exact original file (SHA-256 verified): " << rebuilt.size() << " bytes to " << utf8(output) << '\n';
-        } else if (command == L"verify") {
-            const bool allowMissing = argc == 5 && std::wstring(argv[4]) == L"--no-original";
-            check(argc == 4 || allowMissing, "verify requires original and encoded paths and optionally --no-original");
-            verify(movie, argv[3], codec);
-            const auto stored = read_original_chunk(argv[3]);
+        } else if (command == "verify") {
+            verify(movie, secondPath, codec);
+            const auto stored = read_original_chunk(secondPath);
             if (stored.empty()) {
                 // 이 검사를 원본 삭제의 근거로 쓰므로 복원할 수 없는 파일은 실패로 처리한다.
-                check(allowMissing, "This AVI holds no original file data, so the original file cannot be restored from it");
+                check(noOriginal, "This AVI holds no original file data, so the original file cannot be restored from it");
                 std::cout << "WARNING: This AVI holds no original file data; keep the original\n";
             } else {
-                check(rebuild_from_avi(read_movie(argv[3]), stored, codec) == read_file(argv[2]), "Original file verification failed");
+                check(rebuild_from_avi(read_movie(secondPath), stored, codec) == read_file(firstPath), "Original file verification failed");
                 std::cout << "Verified exact original file\n";
             }
-        } else if (command == L"bench") {
+        } else if (command == "bench") {
             check(movie.jxl, "bench requires an MJXL AVI");
             const auto start = std::chrono::steady_clock::now();
             unsigned frames = 0;
@@ -585,8 +598,37 @@ int wmain(int argc, wchar_t** argv)
             throw std::runtime_error("Unknown command");
         }
         return 0;
+    } catch (const mjxl::UsageError& error) {
+        std::cerr << "Error: " << error.what() << "\nRun \"mjxl --help\" for usage.\n";
+        return 1;
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n';
         return 1;
     }
 }
+
+#ifdef _WIN32
+// Windows 인자는 UTF-16으로 받아 UTF-8로 옮기고 콘솔도 UTF-8로 맞춘다.
+int wmain(int argc, wchar_t** argv)
+{
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    std::vector<std::string> arguments;
+    for (int i = 1; i < argc; ++i) {
+        const int length = static_cast<int>(wcslen(argv[i]));
+        std::string text;
+        if (length) {
+            const int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], length, nullptr, 0, nullptr, nullptr);
+            text.resize(static_cast<size_t>(size));
+            WideCharToMultiByte(CP_UTF8, 0, argv[i], length, text.data(), size, nullptr, nullptr);
+        }
+        arguments.push_back(std::move(text));
+    }
+    return run(arguments);
+}
+#else
+int main(int argc, char** argv)
+{
+    return run(std::vector<std::string>(argv + 1, argv + argc));
+}
+#endif

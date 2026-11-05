@@ -19,6 +19,15 @@ VS2026의 v145 도구 집합과 Windows SDK가 필요하다. FFmpeg 헤더·impo
 
 libjxl 0.11.2와 필수 하위 의존성은 `_deps/libjxl`에서 정적으로 빌드한다. C++ 런타임도 정적으로 포함한다. 다른 프로그램이 먼저 불러온 구형 MSVCP140.dll과 충돌하지 않게 하기 위한 구성이다. Microsoft DirectShow 기본 클래스 원본은 보존하고, VS2026 호환 수정 두 곳을 빌드 폴더 사본에만 적용한다.
 
+## Linux 빌드
+
+`mjxl` 명령줄 도구는 GCC나 Clang으로 빌드할 수 있다. 시스템의 FFmpeg, libjxl, Brotli를 사용한다. DirectShow 필터와 Media Foundation 디코더는 Windows 전용이다. 결과는 `dist/linux/mjxl`에 생성한다.
+
+```bash
+sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat-dev libavcodec-dev libavutil-dev
+make -C native
+```
+
 ## 변환·복원·검증
 
 ```powershell
@@ -29,7 +38,7 @@ $mjxl = 'W:\proj\mjxl\dist\Release\mjxl.exe'
 & $mjxl bench W:\proj\mjxl\results\example.avi
 ```
 
-`encode`는 프레임마다 원래 JPEG의 정확한 복원과 FLAC의 PCM 복원을 확인하고, 파일 작성 후 다시 AVI를 읽어 JPEG 패킷과 PCM 샘플 전체를 비교한다. 출력 경로 뒤에 `--flac`을 붙이면 음성을 FLAC으로 저장한다. 현재 샘플에서 음성을 약 34% 줄이지만 파일 전체 절감은 약 0.365%이다. `restore`는 원래 JPEG 패킷을 MJPEG AVI로 돌려 놓는다. JPEG를 픽셀로 디코딩했다가 재인코딩하지 않는다. 기존 출력 파일은 덮어쓰지 않는다. 검증 전에는 `.partial` 이름을 사용하고 성공하면 최종 이름으로 바꾼다.
+`encode`는 프레임마다 원래 JPEG의 정확한 복원과 FLAC의 PCM 복원을 확인하고, 파일 작성 후 다시 AVI를 읽어 JPEG 패킷과 PCM 샘플 전체를 비교한다. `mjxl --help`와 `mjxl encode --help`로 명령과 옵션을 볼 수 있다. 옵션은 명령마다 다르며 명령 뒤 어느 위치에 써도 된다. 명령 앞에는 쓸 수 없다. `--flac`을 붙이면 음성을 FLAC으로 저장한다. 현재 샘플에서 음성을 약 34% 줄이지만 파일 전체 절감은 약 0.365%이다. `-e 1-10` 또는 `--effort 1-10`은 JXL 압축 강도를 정하며 기본값은 7이다. 21프레임 측정에서 8은 약 3배 느리고 약 0.2%포인트 더 줄었다. 9와 10은 30배 이상 느리지만 더 줄지 않았다. `restore`는 원래 JPEG 패킷을 MJPEG AVI로 돌려 놓는다. JPEG를 픽셀로 디코딩했다가 재인코딩하지 않는다. 기존 출력 파일은 덮어쓰지 않는다. 검증 전에는 `.partial` 이름을 사용하고 성공하면 최종 이름으로 바꾼다.
 
 `encode`는 영상·음성 패킷을 뺀 원본 파일의 나머지 바이트와 패킷 배치를 Brotli로 압축해 AVI 끝의 `mjxo` 청크에 저장한다. 현재 샘플의 비용은 파일당 약 1.4~6.2 KiB이다. 파일 이름을 확정하기 전에 저장된 AVI만으로 원본 전체가 복원되는지 확인한다. `restore-original`은 원본 파일을 바이트 단위로 복원하고 SHA-256을 검사한다. `verify`도 원본 파일 전체를 비교하므로 원본을 지우기 전에 이 명령으로 확인한다. 패킷이 입력 파일과 일치하지 않는 등 복원 정보를 만들 수 없으면 `encode`가 실패한다. 복원 정보 없이 인코딩하려면 `--no-original`을 지정한다. 이 옵션으로 만든 파일과 이전 도구로 만든 AVI는 원본을 복원할 수 없으며, `verify`는 `--no-original`을 지정하지 않으면 이런 파일을 실패로 처리한다.
 
@@ -40,6 +49,18 @@ $mjxl = 'W:\proj\mjxl\dist\Release\mjxl.exe'
 `--flac`은 FFmpeg FLAC 인코더를 사용한다. 이 인코더는 8비트를 지원하지 않으므로 8비트 PCM은 16비트 FLAC의 상위 바이트에 저장하고, 원래 비트는 `hdrl` 안의 `mjxa` 청크에 기록한다. 24비트는 24비트 FLAC으로 저장하고 32비트 PCM은 PCM으로 유지한다. `restore`와 `restore-original`은 이 정보로 원래 PCM 바이트를 되돌리며, `mjxa`가 없는 FLAC AVI는 거부한다.
 
 `restore`는 재생과 편집을 위한 MJPEG AVI를 만들고 원본 컨테이너를 재현하지 않는다. 원본 파일 전체가 필요하면 `restore-original`을 사용한다.
+
+## 다른 PC에 설치
+
+작업 드라이브를 빼도 동작하도록 빌드된 `dist/Release`에서 현재 사용자의 로컬 폴더로 복사하고 등록한다. 관리자 권한은 필요하지 않다. 기본 위치는 `%LOCALAPPDATA%\MJXL`이다. 드라이브 문자는 스크립트 위치로 찾으므로 어느 드라이브에서 실행해도 된다.
+
+```bat
+W:\proj\mjxl\native\install.cmd
+W:\proj\mjxl\native\install.cmd -DecoderOnly
+W:\proj\mjxl\native\install.cmd -Uninstall
+```
+
+디코더, `mjxl.exe`, 필요한 FFmpeg DLL과 라이선스를 복사하고 디코더를 등록한 뒤 DirectShow 필터 캐시를 지운다. `-DecoderOnly`는 재생에 필요한 디코더만 설치한다. `-Destination`으로 위치를 바꿀 수 있다. `-Uninstall`은 설치 기록에 있는 파일만 지운다. 64비트 플레이어에서만 동작한다. 다시 빌드한 뒤에는 `install.cmd`를 다시 실행해야 로컬 복사본이 바뀐다. `register.ps1`은 개발용으로 빌드 폴더의 디코더를 등록하므로 드라이브를 빼면 재생되지 않는다.
 
 ## 팟플레이어와 DirectShow
 

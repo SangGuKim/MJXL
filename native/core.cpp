@@ -24,7 +24,7 @@ Codec::~Codec()
     JxlThreadParallelRunnerDestroy(runner_);
 }
 
-std::vector<uint8_t> Codec::encode(std::span<const uint8_t> input) const
+std::vector<uint8_t> Codec::encode(std::span<const uint8_t> input, int effort) const
 {
     std::unique_ptr<JxlEncoder, decltype(&JxlEncoderDestroy)> enc(JxlEncoderCreate(nullptr), JxlEncoderDestroy);
     require(enc != nullptr, "Cannot create JPEG XL encoder");
@@ -33,6 +33,7 @@ std::vector<uint8_t> Codec::encode(std::span<const uint8_t> input) const
     require(JxlEncoderStoreJPEGMetadata(enc.get(), JXL_TRUE) == JXL_ENC_SUCCESS, "Cannot enable JPEG reconstruction");
     auto settings = JxlEncoderFrameSettingsCreate(enc.get(), nullptr);
     require(settings != nullptr, "Cannot create JXL settings");
+    require(JxlEncoderFrameSettingsSetOption(settings, JXL_ENC_FRAME_SETTING_EFFORT, effort) == JXL_ENC_SUCCESS, "Cannot set JXL effort");
     require(JxlEncoderAddJPEGFrame(settings, input.data(), input.size()) == JXL_ENC_SUCCESS, "JPEG is unsupported by libjxl");
     JxlEncoderCloseInput(enc.get());
     std::vector<uint8_t> result;

@@ -13,8 +13,12 @@ public:
     ~Codec();
     Codec(const Codec&) = delete;
     Codec& operator=(const Codec&) = delete;
-    /** @brief Recompresses a JPEG while retaining exact reconstruction data. */
-    std::vector<uint8_t> encode(std::span<const uint8_t> jpeg) const;
+    /**
+     * @brief Recompresses a JPEG while retaining exact reconstruction data.
+     * @param jpeg Original JPEG bytes.
+     * @param effort libjxl encoder effort from 1 to 10. Higher values are slower.
+     */
+    std::vector<uint8_t> encode(std::span<const uint8_t> jpeg, int effort = 7) const;
     /** @brief Reconstructs the exact original JPEG bytes. */
     std::vector<uint8_t> jpeg(std::span<const uint8_t> input) const;
     /** @brief Decodes an independent JXL frame to top-down packed RGB8. */
