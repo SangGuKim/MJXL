@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-MJXL is an experimental Windows project that reduces the size of existing MJPEG videos by reversibly recompressing their JPEG frames with JPEG XL. The native tools produce MJXL AVI files that can restore the complete original file byte for byte, with playback through a DirectShow filter.
+MJXL is an experimental project for Windows and Linux that reduces the size of existing MJPEG videos by reversibly recompressing their JPEG frames with JPEG XL. The native tools produce MJXL AVI files that can restore the complete original file byte for byte, with playback through a DirectShow filter.
 
 - Build, conversion, and playback: [Native tools guide (Korean)](native/README.md)
 - Validation scope and work log: [STATUS.md (Korean)](STATUS.md)
@@ -28,7 +28,22 @@ Set `FFMPEG_SDK` to your FFmpeg SDK directory, then run the following commands f
 .\native\install.cmd
 ```
 
-On Linux, install FFmpeg, libjxl, and Brotli development packages and run `make -C native` to build `dist/linux/mjxl`. The DirectShow filter and the Media Foundation decoder are Windows only.
+### Linux CLI
+
+The standalone CLI builds with a C++20 compiler and the system FFmpeg, libjxl, and Brotli libraries. GCC 13 on Ubuntu 24.04 (WSL2, x86-64) has been verified. The DirectShow filter and Media Foundation decoder are Windows only; this build does not install a Linux playback plugin.
+
+```bash
+sudo apt update
+sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat-dev libavcodec-dev libavutil-dev
+make -C native -j4
+mkdir -p results
+./dist/linux/mjxl encode input.mov results/output.avi --flac
+./dist/linux/mjxl verify input.mov results/output.avi
+./dist/linux/mjxl restore-original results/output.avi results/restored.mov
+sha256sum input.mov results/restored.mov
+```
+
+The executable dynamically links system libraries; build it on the target distribution rather than treating it as a universal Linux binary. Compression sizes can differ between library versions. For a directory of your own MOV samples, run `python3 native/validate_cli.py --binary dist/linux/mjxl --samples samples --output results/linux-check` with a new output directory. This checks PCM and FLAC encodes, exact original restoration, MJPEG AVI restoration, and pixel decoding without requiring a player.
 
 Provide your own input video. Output files are not overwritten. `encode` accepts `-e 1-10` or `--effort 1-10` to set the JXL effort; the default is 7. Options follow the command and may appear in any order after it. Run `mjxl --help` or `mjxl encode --help` for details. `restore-original` recreates the original file and checks its SHA-256 hash. `restore` instead builds an MJPEG AVI from the preserved JPEG packets. `verify` compares the rebuilt file with the original, so run it before deleting an original. `encode` fails if it cannot store the data needed for `restore-original`; add `--no-original` to skip it. Files made that way or by earlier versions cannot restore the original file. PotPlayer playback has been verified on the development PC. VLC does not use this DirectShow decoder.
 

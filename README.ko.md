@@ -2,9 +2,10 @@
 
 [English](README.md) | **한국어**
 
-MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축하여 저장 공간을 줄이는 Windows 실험 프로젝트이다. 네이티브 도구는 원본 파일 전체를 바이트 단위로 복원할 수 있는 MJXL AVI를 생성하고 DirectShow 필터로 재생한다. PCM은 기본적으로 그대로 복사하며 `--flac`으로 무손실 압축할 수 있다.
+MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축하여 저장 공간을 줄이는 Windows·Linux 실험 프로젝트이다. 네이티브 도구는 원본 파일 전체를 바이트 단위로 복원할 수 있는 MJXL AVI를 생성하고 DirectShow 필터로 재생한다. PCM은 기본적으로 그대로 복사하며 `--flac`으로 무손실 압축할 수 있다.
 
 - 변환·재생·빌드·설치: [네이티브 사용 방법](native/README.md). 다른 PC에는 `native\install.cmd`로 설치한다.
+- Linux CLI: [빌드와 실행 안내](native/README.md#linux-빌드). Ubuntu 24.04 WSL2에서 PCM·FLAC 변환과 원본 복원을 검증했다.
 - 검증 범위와 작업 기록: [STATUS.md](STATUS.md)
 - Media Foundation 구현은 실험 단계이며 Windows Media Player 지원은 미완료이다.
 - 샘플 영상, 의존성, 빌드 산출물과 서명 인증서는 저장소에 포함하지 않는다.

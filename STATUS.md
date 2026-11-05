@@ -104,3 +104,11 @@ native/Makefile로 시스템의 FFmpeg, libjxl, Brotli를 사용해 mjxl을 빌�
 native/install.cmd와 install.ps1을 추가했다. 작업 드라이브가 영속적이지 않으므로 디코더와 도구를 %LOCALAPPDATA%\MJXL로 복사하고 현재 사용자용으로 등록한 뒤 필터 캐시를 지운다. FFmpeg DLL은 가져오기 이름을 따라가 avcodec, avformat, avutil, swresample만 복사하며 합계는 약 132MB이다. 제거는 설치 기록에 있는 파일만 지운다.
 
 이 PC의 등록을 W: 경로에서 로컬 복사본으로 옮겼다. 등록 경로와 자동 필터 선택 재생·탐색, 팟플레이어의 로컬 디코더 로드, 시스템 PATH만 둔 mjxl.exe의 인코딩·verify·원본 복원, 새 썸네일 생성을 확인했다. 드라이브를 실제로 분리한 시험과 다른 PC 시험은 하지 않았다. 이 PC의 썸네일은 Program Files의 MFT로 생성된다. 다시 빌드하면 install.cmd를 다시 실행해야 한다.
+
+## Linux CLI 실행 검증: 2026-11-05
+
+WSL2 Ubuntu 24.04 x86-64에 libjxl-dev, libbrotli-dev, libavformat-dev 등 필요한 개발 패키지를 설치하고 GCC 13으로 CLI 전체를 경고 없이 컴파일·링크했다. libjxl 0.7.0, FFmpeg 6.1.1, Brotli 1.1.0을 사용하며 시스템 공유 라이브러리에 연결한다. Windows 전용 필터나 Linux 재생 플러그인은 설치하지 않는다.
+
+native/validate_cli.py로 7개 샘플의 PCM·FLAC 총 14개 변환과 verify, restore-original을 실행했다. 매 복원 파일의 SHA-256이 원본과 일치했다. 각 모드의 영상은 총 1,332프레임이며 검증 보고서는 results/linux-validation/cli-report.json에 저장했다. 첫 FLAC 파일의 MJPEG AVI 복원과 RGB 디코딩도 통과했다. Windows에서 만든 FLAC MJXL AVI를 Linux에서 verify·원본 복원했고, Linux에서 만든 첫 FLAC AVI도 Windows CLI의 verify를 통과했다. 전체 파일 조합이나 Linux 플레이어 재생까지 검증한 것은 아니다.
+
+Linux 빌드·사용법을 영문 README와 네이티브 문서에 추가했다. 실행 파일은 dist/linux/mjxl이며 Git에서 제외한다. 배포판별 공유 라이브러리에 의존하므로 모든 Linux 배포판에 통용되는 단일 바이너리로 간주하지 않는다.

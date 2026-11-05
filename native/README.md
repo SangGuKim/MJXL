@@ -28,6 +28,20 @@ sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat
 make -C native
 ```
 
+Ubuntu 24.04 WSL2 x86-64의 GCC 13으로 전체 링크와 실행을 검증했다. 실행 파일은 시스템 공유 라이브러리에 동적으로 연결되므로 모든 배포판에서 그대로 실행되는 단일 바이너리는 아니다. libjxl 버전이 다르면 압축 결과 크기가 달라질 수 있다. C++20과 `std::format`을 지원하는 표준 라이브러리가 필요하다.
+
+```bash
+mkdir -p results
+./dist/linux/mjxl encode input.mov results/output.avi --flac
+./dist/linux/mjxl verify input.mov results/output.avi
+./dist/linux/mjxl restore-original results/output.avi results/restored.mov
+sha256sum input.mov results/restored.mov
+# 샘플은 별도로 준비하며 출력 폴더는 새 경로를 지정한다.
+python3 native/validate_cli.py --binary dist/linux/mjxl --samples samples --output results/linux-check
+```
+
+Linux 빌드는 CLI만 제공하며 GStreamer·FFmpeg용 재생 플러그인을 등록하지 않는다.
+
 ## 변환·복원·검증
 
 ```powershell
