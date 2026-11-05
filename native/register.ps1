@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $OutputEncoding = [Console]::OutputEncoding
 $decoder = Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\Release\mjxl_decoder.ax'
-if (-not (Test-Path -LiteralPath $decoder)) { throw '디코더를 먼저 빌드해야 한다.' }
+if (-not (Test-Path -LiteralPath $decoder)) { throw 'Build the decoder first.' }
 $arguments = @('/s')
 if ($Unregister) { $arguments += '/u' }
 if ($AllUsers) { $arguments += @('/n', '/i:machine') }
@@ -26,6 +26,6 @@ if ($AllUsers) {
     }
 }
 $process = Start-Process @start
-if ($process.ExitCode) { throw "디코더 등록 작업이 실패했다: $($process.ExitCode)" }
-$scope = if ($AllUsers) { '모든 사용자' } else { '현재 사용자' }
-Write-Output $(if ($Unregister) { "$scope 디코더 등록을 해제했다." } else { "$scope 용으로 MJXL 디코더를 등록했다." })
+if ($process.ExitCode) { throw "Decoder registration failed with exit code $($process.ExitCode)." }
+$scope = if ($AllUsers) { 'all users' } else { 'the current user' }
+Write-Output $(if ($Unregister) { "Unregistered the decoder for $scope." } else { "Registered the MJXL decoder for $scope." })

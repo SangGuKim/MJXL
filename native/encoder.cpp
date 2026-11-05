@@ -40,7 +40,7 @@ struct Packet {
     int64_t position;
 };
 struct Movie {
-    // FLAC AVI에서도 bits는 저장 비트가 아니라 복원할 원래 PCM 비트이다.
+    // For FLAC AVI, bits describes the original PCM depth to restore, not the stored depth.
     unsigned width = 0, height = 0, sampleRate = 0, channels = 0, bits = 0;
     AVRational fps{};
     bool jxl = false;
@@ -62,7 +62,7 @@ static std::string utf8(const fs::path& path)
     return {reinterpret_cast<const char*>(text.data()), text.size()};
 }
 
-// hdrl 안의 mjxa 청크에서 FLAC로 저장하기 전의 PCM 비트 수를 읽는다.
+// Read the original PCM depth from the mjxa chunk inside hdrl.
 static unsigned read_original_bits(const fs::path& path)
 {
     std::ifstream file(path, std::ios::binary);
@@ -182,7 +182,7 @@ class AviWriter {
     struct Entry { uint32_t id, flags, offset, size; };
     std::vector<Entry> index_;
 
-    // FLAC 프레임을 가변 크기 오디오 청크로 선언하고 원래 PCM 비트를 별도 청크에 남긴다.
+    // Declare FLAC frames as variable-size audio chunks and preserve the original PCM depth separately.
     void write_flac_header(const Movie& movie, const mjxl::FlacStream& flac)
     {
         uint64_t total = 0;
@@ -202,7 +202,7 @@ class AviWriter {
         tag("strf"); u32(static_cast<uint32_t>(18 + flac.streamInfo.size()));
         u16(kFlacFormatTag); u16(static_cast<uint16_t>(movie.channels));
         u32(movie.sampleRate); u32(static_cast<uint32_t>(total * movie.sampleRate / samples));
-        // AVI Splitter가 청크당 재생 시간을 계산할 수 있게 VBR 관례대로 프레임당 샘플 수를 적는다.
+        // Follow the VBR convention: record samples per frame so AVI Splitter can determine chunk duration.
         u16(static_cast<uint16_t>(flac.frameSamples)); u16(static_cast<uint16_t>(flac.storedBits));
         u16(static_cast<uint16_t>(flac.streamInfo.size()));
         bytes(flac.streamInfo.data(), flac.streamInfo.size());
@@ -244,9 +244,10 @@ public:
             audioLengthPos_ = position(); u32(0);
             u32(65536); u32(0xffffffff); u32(blockAlign_);
             for (int i = 0; i < 4; ++i) { u16(0); }
-            tag("strf"); u32(18); u16(1); u16(static_cast<uint16_t>(movie.channels));
+            // Use 16-byte PCMWAVEFORMAT: PotPlayer clicks periodically on the 18-byte form with cbSize 0.
+            tag("strf"); u32(16); u16(1); u16(static_cast<uint16_t>(movie.channels));
             u32(movie.sampleRate); u32(movie.sampleRate * blockAlign_);
-            u16(static_cast<uint16_t>(blockAlign_)); u16(static_cast<uint16_t>(movie.bits)); u16(0);
+            u16(static_cast<uint16_t>(blockAlign_)); u16(static_cast<uint16_t>(movie.bits));
             finish_list(stream);
         }
         finish_list(hdrl);
@@ -297,7 +298,7 @@ public:
         if (video) {
             ++frames_;
         } else if (flac_) {
-            // 가변 크기 오디오 스트림의 길이는 청크 수이다.
+            // The length of a variable-size audio stream is its chunk count.
             ++samples_;
         } else {
             check(blockAlign_ && data.size() % blockAlign_ == 0, "PCM packet is not sample aligned");
@@ -310,7 +311,7 @@ public:
         tag("idx1"); u32(static_cast<uint32_t>(index_.size() * sizeof(Entry)));
         bytes(index_.data(), index_.size() * sizeof(Entry));
         if (!original.empty()) {
-            // 재생기가 건너뛰도록 원본 복원 정보를 RIFF 끝의 별도 청크에 둔다.
+            // Store original-file reconstruction data in a separate trailing RIFF chunk that players can skip.
             tag("mjxo"); u32(static_cast<uint32_t>(original.size()));
             bytes(original.data(), original.size());
             if (original.size() & 1) { const char zero = 0; bytes(&zero, 1); }
@@ -322,7 +323,7 @@ public:
     }
 };
 
-// 저장 형식과 상관없이 음성 전체를 원래 PCM 바이트로 돌려준다.
+// Restore all audio to the original PCM bytes regardless of the storage format.
 static std::vector<uint8_t> pcm_of(const Movie& movie)
 {
     std::vector<uint8_t> pcm;
@@ -374,7 +375,7 @@ static std::vector<uint8_t> read_file(const fs::path& path)
     return bytes;
 }
 
-// RIFF 최상위에서 mjxo 청크를 찾는다. 없으면 빈 값을 돌려준다.
+// Find the top-level RIFF mjxo chunk; return an empty value if it is absent.
 static std::vector<uint8_t> read_original_chunk(const fs::path& path)
 {
     const auto total = fs::file_size(path);
@@ -402,7 +403,7 @@ static std::vector<uint8_t> read_original_chunk(const fs::path& path)
     return {};
 }
 
-// 원본을 복원할 수 없는 출력을 조용히 만들지 않도록 복원 정보를 만들지 못하면 인코딩을 중단한다.
+// Abort encoding if reconstruction data cannot be created rather than silently losing original-file recovery.
 static std::vector<uint8_t> make_original_data(const Movie& movie, std::span<const uint8_t> file)
 {
     constexpr auto hint = "; the original file could not be restored. Use --no-original to encode without it";
@@ -423,7 +424,7 @@ static std::vector<uint8_t> make_original_data(const Movie& movie, std::span<con
     }
 }
 
-// 인코딩된 AVI만으로 원본 파일 전체를 다시 만든다.
+// Reconstruct the complete original file using only the encoded AVI.
 static std::vector<uint8_t> rebuild_from_avi(const Movie& encoded, std::span<const uint8_t> payload, const mjxl::Codec& codec)
 {
     std::vector<std::vector<uint8_t>> frames;
@@ -433,7 +434,7 @@ static std::vector<uint8_t> rebuild_from_avi(const Movie& encoded, std::span<con
     return mjxl::rebuild_original(payload, frames, pcm_of(encoded));
 }
 
-// 내부 문자열은 UTF-8이므로 경로로 바꿀 때 플랫폼 인코딩에 맡기지 않는다.
+// Internal strings are UTF-8; do not use the platform default encoding when creating paths.
 static fs::path to_path(const std::string& text)
 {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
@@ -449,7 +450,7 @@ static int run(const std::vector<std::string>& arguments)
             return cli.missingCommand ? 1 : 0;
         }
         const auto& command = cli.command;
-        const bool wantFlac = cli.flac, noOriginal = cli.noOriginal;
+        const bool wantFlac = !cli.copyAudio, noOriginal = cli.noOriginal;
         const int effort = cli.effort;
         const fs::path firstPath = to_path(cli.paths[0]);
         const fs::path secondPath = cli.paths.size() > 1 ? to_path(cli.paths[1]) : fs::path{};
@@ -466,7 +467,7 @@ static int run(const std::vector<std::string>& arguments)
             std::optional<mjxl::FlacStream> flac;
             if (wantFlac && !pcm.empty() && mjxl::flac_supported(format)) {
                 flac = mjxl::flac_encode(pcm, format);
-                // 파일을 쓰기 전에 FLAC가 원래 PCM으로 되돌아오는지 확인한다.
+                // Verify exact FLAC-to-PCM reconstruction before writing the file.
                 mjxl::FlacDecoder decoder(flac->streamInfo, format);
                 std::vector<uint8_t> restored;
                 for (const auto& packet : flac->packets) {
@@ -488,7 +489,7 @@ static int run(const std::vector<std::string>& arguments)
             AviWriter writer(partial, movie, MJXL, flac ? &*flac : nullptr);
             unsigned frames = 0;
             size_t nextAudio = 0;
-            // FLAC 프레임은 재생 시각이 해당 영상 프레임에 도달하기 전에 기록한다.
+            // Write each FLAC frame before the video frame at its playback time.
             const auto write_audio_until = [&](int64_t frame) {
                 while (flac && nextAudio < flac->packets.size() &&
                        flac->packets[nextAudio].position * movie.fps.num <= frame * movie.fps.den * movie.sampleRate) {
@@ -509,13 +510,13 @@ static int run(const std::vector<std::string>& arguments)
                 }
             }
             if (flac) {
-                // 마지막 영상 프레임 뒤에 남은 음성을 모두 기록한다.
+                // Write all audio remaining after the last video frame.
                 write_audio_until(INT64_MAX / (int64_t(movie.fps.den) * movie.sampleRate));
             }
             writer.finish(originalData);
             verify(movie, partial, codec);
             if (!originalData.empty()) {
-                // 이름을 확정하기 전에 저장된 AVI만으로 원본 전체가 복원되는지 확인한다.
+                // Verify complete original-file reconstruction from the saved AVI before finalizing its name.
                 const auto stored = read_original_chunk(partial);
                 check(rebuild_from_avi(read_movie(partial), stored, codec) == sourceFile, "Original file verification failed");
                 std::cout << "Verified exact original file: " << sourceFile.size() << " bytes, stored " << originalData.size() << " bytes of container data\n";
@@ -574,7 +575,7 @@ static int run(const std::vector<std::string>& arguments)
             verify(movie, secondPath, codec);
             const auto stored = read_original_chunk(secondPath);
             if (stored.empty()) {
-                // 이 검사를 원본 삭제의 근거로 쓰므로 복원할 수 없는 파일은 실패로 처리한다.
+                // This check may justify deleting an original, so fail if reconstruction is unavailable.
                 check(noOriginal, "This AVI holds no original file data, so the original file cannot be restored from it");
                 std::cout << "WARNING: This AVI holds no original file data; keep the original\n";
             } else {
@@ -608,7 +609,7 @@ static int run(const std::vector<std::string>& arguments)
 }
 
 #ifdef _WIN32
-// Windows 인자는 UTF-16으로 받아 UTF-8로 옮기고 콘솔도 UTF-8로 맞춘다.
+// Convert Windows UTF-16 arguments to UTF-8 and use UTF-8 for the console.
 int wmain(int argc, wchar_t** argv)
 {
     SetConsoleOutputCP(CP_UTF8);

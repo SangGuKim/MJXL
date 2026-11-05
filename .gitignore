@@ -6,16 +6,21 @@ _deps/
 _build/
 dist/
 *.user
+# CMake-generated Visual Studio solutions and projects are local build artifacts.
+*.sln
+*.slnx
+*.vcxproj
+*.vcxproj.filters
 
 .vs/
 x64/
-# 원본 및 변환 영상은 버전 관리에서 제외한다.
+# Exclude source and converted videos from version control.
 *.mov
 *.avi
 *.mkv
 *.mp4
 *.mjxl-lab
-# 개발 서명 인증서와 설치 패키지는 공개 소스에 포함하지 않는다.
+# Exclude development signing certificates and installation packages from public sources.
 *.cer
 *.pfx
 *.p12

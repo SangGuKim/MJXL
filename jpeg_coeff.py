@@ -1,4 +1,4 @@
-"""8비트 baseline JPEG용 가역 계수 실험. 지원하지 않는 구조는 거부한다."""
+"""Experiment with reversible coefficients for 8-bit baseline JPEG; reject unsupported structures."""
 import struct
 import zlib
 from functools import lru_cache

@@ -16,7 +16,7 @@ namespace mjxl {
 namespace {
 constexpr uint32_t kVersion = 1;
 constexpr size_t kHashSize = 32;
-// 비디오와 음성을 뺀 나머지 바이트는 컨테이너 정보뿐이므로 이 크기를 넘으면 손상으로 본다.
+// Non-audio/video bytes contain only container data; treat sizes above this limit as corrupt.
 constexpr uint64_t kResidueLimit = 1ULL << 32;
 constexpr uint64_t kTableLimit = 256ULL * 1024 * 1024;
 
@@ -53,7 +53,7 @@ std::vector<uint8_t> compress(std::span<const uint8_t> data)
     return output;
 }
 
-// 선언된 크기를 믿고 미리 할당하지 않고 실제로 풀린 만큼만 메모리를 늘린다.
+// Grow memory only as data is actually decompressed instead of trusting a declared size.
 std::vector<uint8_t> decompress(std::span<const uint8_t> data, size_t expected)
 {
     std::vector<uint8_t> output;
@@ -99,7 +99,7 @@ void put_value(std::vector<uint8_t>& output, T value)
     output.insert(output.end(), bytes, bytes + sizeof(T));
 }
 
-// 길이를 넘어 읽지 않도록 모든 필드를 이 읽기 도구로만 해석한다.
+// Parse every field through this reader to prevent out-of-bounds reads.
 class Reader {
     std::span<const uint8_t> data_;
     size_t position_ = 0;
@@ -147,7 +147,7 @@ struct Span {
     const uint8_t* source;
 };
 
-// 패킷들이 파일 안에 겹치지 않고 들어가는지 확인한 뒤 위치 순서로 정렬한다.
+// Validate non-overlapping packet ranges within the file, then sort them by position.
 void sort_spans(std::vector<Span>& spans, uint64_t fileSize)
 {
     std::stable_sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) { return a.position < b.position; });
@@ -168,7 +168,7 @@ std::vector<uint8_t> pack_original(std::span<const uint8_t> file, const std::vec
     for (const auto& packet : packets) {
         require(packet.position <= uint64_t((std::numeric_limits<int64_t>::max)()), "Original packet position is too large");
         spans.push_back({packet.position, packet.size, nullptr});
-        // 대부분의 패킷은 앞 패킷 끝에 이어지므로 차이만 저장한다. 영상 크기는 복원한 JPEG에서 알 수 있다.
+        // Most packets follow the previous packet, so store only offsets; video sizes come from reconstructed JPEGs.
         const int64_t delta = static_cast<int64_t>(packet.position) - previousEnd;
         put_varint(table, (static_cast<uint64_t>(delta) << 1) ^ static_cast<uint64_t>(delta >> 63));
         put_varint(table, packet.video ? 1 : uint64_t(packet.size) << 1);
@@ -230,7 +230,7 @@ std::vector<uint8_t> rebuild_original(std::span<const uint8_t> payload, const st
         const auto zigzag = layout.varint();
         const uint64_t delta = (zigzag >> 1) ^ (0 - (zigzag & 1));
         const auto entry = layout.varint();
-        // 부호 없는 덧셈으로 음수 차이를 표현하므로 값이 잘못되어도 아래 파일 범위 검사에서 걸러진다.
+        // Unsigned addition represents negative offsets; subsequent file-range checks reject invalid values.
         Span span{previousEnd + delta, 0, nullptr};
         if (entry == 1) {
             require(videoIndex < video.size(), "Original layout has too many video packets");

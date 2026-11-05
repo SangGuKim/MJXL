@@ -1,10 +1,9 @@
-"""VS2026 CMake 솔루션을 기존 .sln 형식으로도 제공한다."""
+"""Provide the VS2026 CMake solution in the legacy .sln format as well."""
 from pathlib import Path, PureWindowsPath
 import sys
 import xml.etree.ElementTree as ET
 
 root = Path(sys.argv[1]).resolve()
-project_root = Path(__file__).resolve().parent.parent
 solution = ET.parse(root / 'mjxl.slnx')
 projects = []
 for node in solution.findall('.//Project'):
@@ -44,4 +43,3 @@ def write(destination):
     print(destination)
 
 write(root / 'mjxl.sln')
-write(project_root / 'MJXL.sln')

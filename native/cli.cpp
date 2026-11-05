@@ -5,7 +5,7 @@
 
 namespace mjxl {
 namespace {
-enum class Option { Flac, NoOriginal, Effort, Help };
+enum class Option { CopyAudio, NoOriginal, Effort, Help };
 
 struct OptionSpec {
     Option id;
@@ -23,16 +23,16 @@ struct CommandSpec {
     std::vector<Option> options;
 };
 
-// 옵션과 명령의 정의를 이 표에만 두어 파싱과 도움말이 어긋나지 않게 한다.
+// Keep command and option definitions in these tables so parsing and help stay consistent.
 const std::vector<OptionSpec> kOptions = {
-    {Option::Flac, "", "--flac", "--flac", "Store 8, 16 and 24-bit PCM audio as lossless FLAC"},
+    {Option::CopyAudio, "", "--copy-audio", "--copy-audio", "Copy the source audio unchanged instead of storing it as lossless FLAC"},
     {Option::NoOriginal, "", "--no-original", "--no-original", "Do not require data to restore the original file"},
     {Option::Effort, "-e", "--effort", "-e, --effort <1-10>", "JPEG XL encoder effort (default: 7)"},
     {Option::Help, "-h", "--help", "-h, --help", "Show this help"},
 };
 
 const std::vector<CommandSpec> kCommands = {
-    {"encode", "<input> <output.avi>", 2, "Compress an MJPEG video into an MJXL AVI and verify it", {Option::Flac, Option::NoOriginal, Option::Effort, Option::Help}},
+    {"encode", "<input> <output.avi>", 2, "Compress an MJPEG video into an MJXL AVI and verify it", {Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
     {"verify", "<original> <encoded.avi>", 2, "Compare an MJXL AVI with its original file", {Option::NoOriginal, Option::Help}},
     {"restore-original", "<encoded.avi> <output>", 2, "Rebuild the original file byte for byte", {Option::Help}},
     {"restore", "<encoded.avi> <output.avi>", 2, "Write the original JPEG frames and PCM as an MJPEG AVI", {Option::Help}},
@@ -117,7 +117,7 @@ CommandLine parse_command_line(const std::vector<std::string>& arguments)
             optionsEnded = true;
             continue;
         }
-        // --이름=값 형식은 이름과 값을 나눠서 표와 비교한다.
+        // Split --name=value into its name and value before looking it up in the table.
         const size_t equals = argument.starts_with("--") ? argument.find('=') : std::string::npos;
         const std::string name = argument.substr(0, equals);
         const auto found = std::find_if(command->options.begin(), command->options.end(), [&](Option id) {
@@ -132,8 +132,8 @@ CommandLine parse_command_line(const std::vector<std::string>& arguments)
         }
         if (*found == Option::Help) {
             result.help = true;
-        } else if (*found == Option::Flac) {
-            result.flac = true;
+        } else if (*found == Option::CopyAudio) {
+            result.copyAudio = true;
         } else if (*found == Option::NoOriginal) {
             result.noOriginal = true;
         } else if (equals != std::string::npos) {

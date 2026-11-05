@@ -1,4 +1,4 @@
-"""MJPEG 원본 보존 실험. Python 3 + PyAV + libjxl이 필요하다."""
+"""Experiment with exact MJPEG preservation. Requires Python 3, PyAV, and libjxl."""
 import argparse
 import ctypes as C
 import hashlib

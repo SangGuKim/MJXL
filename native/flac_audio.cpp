@@ -54,7 +54,7 @@ Packet make_packet()
     return packet;
 }
 
-// PCM 표본을 FFmpeg FLAC 인코더가 받는 왼쪽 정렬 정수로 옮긴다.
+// Convert PCM samples to the left-aligned integers accepted by the FFmpeg FLAC encoder.
 void write_samples(uint8_t* target, const uint8_t* source, size_t samples, unsigned bits)
 {
     if (bits == 8) {
@@ -73,7 +73,7 @@ void write_samples(uint8_t* target, const uint8_t* source, size_t samples, unsig
     }
 }
 
-// 디코더 표본을 원래 PCM 바이트로 되돌린다. 원래 비트 밖의 값이 있으면 복원을 거부한다.
+// Restore decoded samples to original PCM bytes; reject values outside the original bit depth.
 void append_sample(std::vector<uint8_t>& output, int32_t value, unsigned bits)
 {
     if (bits == 8) {
@@ -132,9 +132,9 @@ FlacStream flac_encode(std::span<const uint8_t> pcm, const PcmFormat& format)
     context->sample_rate = static_cast<int>(format.sampleRate);
     context->time_base = {1, static_cast<int>(format.sampleRate)};
     context->compression_level = 12;
-    // FFmpeg 기본값은 저표본율에서 블록이 작아 헤더와 AVI 청크 비용이 커진다. 약 0.25초 단위로 묶는다.
+    // At low sample rates, FFmpeg defaults to small blocks with high header and AVI overhead; use roughly 0.25-second blocks.
     context->frame_size = format.sampleRate <= 16000 ? 2048 : 4096;
-    // FFmpeg FLAC 인코더는 채널 수별로 정해진 배치만 받는다. 표본 순서는 그대로 보존된다.
+    // The FFmpeg FLAC encoder requires a predefined layout for each channel count; sample order is preserved.
     const AVChannelLayout layouts[] = {AV_CHANNEL_LAYOUT_MONO, AV_CHANNEL_LAYOUT_STEREO, AV_CHANNEL_LAYOUT_SURROUND, AV_CHANNEL_LAYOUT_QUAD,
                                        AV_CHANNEL_LAYOUT_5POINT0_BACK, AV_CHANNEL_LAYOUT_5POINT1_BACK, AV_CHANNEL_LAYOUT_6POINT1, AV_CHANNEL_LAYOUT_7POINT1};
     require(av_channel_layout_copy(&context->ch_layout, &layouts[format.channels - 1]) >= 0, "Cannot set audio channels");
@@ -151,11 +151,11 @@ FlacStream flac_encode(std::span<const uint8_t> pcm, const PcmFormat& format)
                 return;
             }
             require(status >= 0, "FLAC encoding failed");
-            // 인코더의 마지막 패킷은 표본 없이 STREAMINFO만 전달할 수 있다.
+            // The final encoder packet may contain only STREAMINFO without samples.
             if (packet->size > 0) {
                 stream.packets.push_back({packet->pts, {packet->data, packet->data + packet->size}});
             }
-            // 마지막 패킷의 STREAMINFO에는 전체 길이와 MD5가 들어 있다.
+            // STREAMINFO in the final packet contains the total length and MD5.
             size_t infoSize = 0;
             const uint8_t* info = av_packet_get_side_data(packet.get(), AV_PKT_DATA_NEW_EXTRADATA, &infoSize);
             if (info && infoSize) {
@@ -192,7 +192,7 @@ struct FlacDecoder::State {
     Packet packet = make_packet();
     PcmFormat format;
 
-    // 디코더에 쌓인 프레임을 모두 원래 PCM 바이트로 옮긴다.
+    // Convert every buffered decoder frame back to the original PCM bytes.
     std::vector<uint8_t> drain()
     {
         std::vector<uint8_t> output;

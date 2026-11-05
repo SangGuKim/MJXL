@@ -1,4 +1,4 @@
-"""독립 CLI의 PCM·FLAC 변환과 원본 전체 복원을 플랫폼 공통으로 검증한다."""
+"""Validate standalone CLI PCM/FLAC encoding and exact original-file restoration across platforms."""
 import argparse
 import hashlib
 import json
@@ -33,12 +33,12 @@ def main():
             folder.mkdir(exist_ok=True)
             avi = folder / (source.stem + '.avi')
             restored = folder / (source.stem + '.restored.mov')
-            run('encode', source, avi, *(['--flac'] if mode == 'flac' else []))
+            run('encode', source, avi, *(['--copy-audio'] if mode == 'pcm' else []))
             verification = run('verify', source, avi)
             run('restore-original', avi, restored)
             if hashlib.sha256(restored.read_bytes()).hexdigest() != digest:
                 raise RuntimeError(f'Original hash differs: {source} ({mode})')
-            # 비교용 복원 파일은 검증 후 삭제하고 압축 결과와 보고서를 남긴다.
+            # Remove comparison restore files after verification; retain encoded files and reports.
             restored.unlink()
             records.append(dict(source=source.name, mode=mode, original_bytes=source.stat().st_size,
                                 avi_bytes=avi.stat().st_size, sha256=digest, verification=verification))

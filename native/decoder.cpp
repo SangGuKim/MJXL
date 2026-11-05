@@ -149,7 +149,7 @@ int g_cTemplates = 1;
 static HRESULT register_filter(bool install, bool allUsers = false)
 {
     HKEY classes = nullptr;
-    // 시스템 Classes 루트는 쓰기 권한 없이 열고 실제 등록 하위 키에서 권한을 검사한다.
+    // Open the system Classes root without write access; check permissions on the registration subkey.
     auto status = allUsers
         ? RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Classes", 0, KEY_READ, &classes)
         : RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes", 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &classes, nullptr);

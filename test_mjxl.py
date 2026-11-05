@@ -1,4 +1,4 @@
-"""실제 샘플과 통제 입력을 사용하는 가역 복원 검사."""
+"""Validate reversible reconstruction using real samples and controlled inputs."""
 import argparse
 from pathlib import Path
 import tempfile

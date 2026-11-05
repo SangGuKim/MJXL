@@ -11,7 +11,7 @@ struct CommandLine {
     std::vector<std::string> paths; /**< Path arguments in command order. */
     bool help = false;              /**< True when help was requested or no command was given. */
     bool missingCommand = false;    /**< True when no arguments were given at all. */
-    bool flac = false;              /**< Store audio as FLAC. */
+    bool copyAudio = false;         /**< Copy the source audio instead of storing it as FLAC. */
     bool noOriginal = false;        /**< Allow output or input without original file data. */
     int effort = 7;                 /**< JPEG XL encoder effort from 1 to 10. */
 };

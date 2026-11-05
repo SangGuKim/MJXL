@@ -56,7 +56,7 @@ static ComPtr<IMFSample> read(IMFSourceReader* reader, LONGLONG& time)
     }
     throw std::runtime_error("Too many empty video samples");
 }
-// 스트라이드 속성이 없으면 Media Foundation 규칙대로 아래에서 위 방향으로 해석한다.
+// Without a stride attribute, interpret the image as bottom-up according to Media Foundation rules.
 static LONG stride_of(IMFMediaType* type, UINT32 width)
 {
     UINT32 raw = 0;
@@ -100,7 +100,7 @@ static ComPtr<IMFSample> output_sample(IMFTransform* transform)
     check(sample->AddBuffer(buffer.Get()), "Output add buffer");
     return sample;
 }
-// 지정한 스트라이드 설정으로 한 프레임을 변환하여 방향과 현재 형식 속성을 확인한다.
+// Transform one frame with the requested stride and check orientation and current-type attributes.
 static void stride_case(IClassFactory* factory, IMFMediaType* input, IMFSample* packet, mjxl::Codec& codec, bool specified, LONG requested, LONG expected)
 {
     UINT32 width = 0, height = 0;
@@ -144,7 +144,7 @@ static void stride_test(IClassFactory* factory, IMFMediaType* input, IMFSample* 
     check(output->SetUINT32(MF_MT_DEFAULT_STRIDE, static_cast<UINT32>(minimum + 4)), "Padded stride value");
     require(transform->SetOutputType(0, output.Get(), 0) == MF_E_INVALIDMEDIATYPE, "Unsupported stride must be rejected");
 }
-// 드레인을 끝낸 변환기는 flush 없이도 다음 입력을 받아야 한다.
+// A transform that has finished draining must accept new input without a flush.
 static void drain_test(IClassFactory* factory, IMFMediaType* input, IMFSample* packet)
 {
     auto transform = create_transform(factory);
@@ -159,7 +159,7 @@ static void drain_test(IClassFactory* factory, IMFMediaType* input, IMFSample* p
     auto first = output_sample(transform.Get());
     MFT_OUTPUT_DATA_BUFFER out{0, first.Get(), 0, nullptr};
     check(transform->ProcessOutput(0, 1, &out, &status), "Drained output");
-    // 대기 샘플이 빠진 뒤에도 NEED_MORE_INPUT을 돌려주기 전까지는 드레인 중이다.
+    // After the pending sample is consumed, draining continues until NEED_MORE_INPUT is returned.
     check(transform->GetInputStatus(0, &flags), "Input status while draining");
     require(flags == 0, "Draining transform must not accept input");
     require(transform->ProcessOutput(0, 1, &out, &status) == MF_E_TRANSFORM_NEED_MORE_INPUT, "Completed drain must request input");

@@ -1,42 +1,44 @@
-# 첫 샘플 실험 결과
+# First-sample experimental results
 
-## 입력과 조건
+**English** | [Korean](RESULTS.ko.md)
 
-- 입력: `samples/IMG_20040318_225819.MOV`
-- 원본 크기: 1,301,421바이트
-- 원본 SHA-256: `0d015a314f1ce475984a5296b79621065a2be0963c4d4b744dd13c25fb5aeeb1`
-- 영상: MJPEG, 640 × 480, 28프레임, 15fps, 약 1.87초
-- 음성: PCM unsigned 8-bit, 8,040Hz
-- libjxl: 0.11.2, JPEG 가역 재압축, 기본 인코딩 설정
-- GOP: 12프레임
-- 모든 파일 크기는 JSON 실험 헤더, 음성 및 원본 컨테이너 정보 보존 비용을 포함한다.
+## Input and settings
 
-## 전체 파일 비교
+- Input: `samples/IMG_20040318_225819.MOV`
+- Original size: 1,301,421 bytes
+- Original SHA-256: `0d015a314f1ce475984a5296b79621065a2be0963c4d4b744dd13c25fb5aeeb1`
+- Video: MJPEG, 640 x 480, 28 frames, 15 fps, approximately 1.87 seconds
+- Audio: unsigned 8-bit PCM, 8,040 Hz
+- libjxl: 0.11.2, reversible JPEG recompression, default encoder settings
+- GOP: 12 frames
+- All sizes include the experimental JSON header, audio, and original-container preservation data.
 
-| 방식 | 저장 크기(바이트) | 원본 대비 절감률 | P프레임 수 | 전체 파일 복원 |
+## Full-file comparison
+
+| Mode | Stored bytes | Savings over original | P frames | Full-file restoration |
 | --- | ---: | ---: | ---: | --- |
-| JXL 독립 프레임 | 1,128,261 | 13.305% | 0 | 일치 |
-| JXL + JPEG 사전 P | 1,279,085 | 1.716% | 25 | 일치 |
-| JXL + DCT 계수 P | 3,081,875 | -136.808% | 25 | 일치 |
-| 프레임별 최소 크기 혼합 | 1,128,261 | 13.305% | 0 | 일치 |
+| Independent JXL | 1,128,261 | 13.305% | 0 | Exact |
+| JXL + JPEG-dictionary P | 1,279,085 | 1.716% | 25 | Exact |
+| JXL + DCT-coefficient P | 3,081,875 | -136.808% | 25 | Exact |
+| Smallest representation per frame | 1,128,261 | 13.305% | 0 | Exact |
 
-모든 모드에서 각 레코드 및 원본 MOV 전체의 바이트 비교와 SHA-256 검증을 통과했다. 원본 파일은 변경하지 않았다. 프레임별 수치는 `results/coeff-v1/IMG_20040318_225819.report.json`에 기록한다.
+Every mode passed record-level and full-MOV byte comparison and SHA-256 verification. The source was not modified. Frame measurements are recorded in `results/coeff-v1/IMG_20040318_225819.report.json`.
 
-현재 계수 방식은 같은 위치의 계수 차이를 int16으로 직렬화하고 원래 허프먼 심벌을 함께 저장하는 첫 기준 구현이다. 움직임 보상, 주파수별 엔트로피 모델, 심벌 예측이 없다. 이 결과로 프레임 간 가역 압축 자체의 가능성을 부정할 수 없다. 이 샘플에서는 현재 후보 중 JXL 독립 방식이 가장 작다.
+Coefficient mode is an initial baseline that serializes same-position coefficient differences as int16 values and preserves the original Huffman symbols. It has no motion compensation, frequency-specific entropy model, or symbol prediction. These results do not rule out efficient reversible inter-frame compression. Independent JXL was smallest among the implemented candidates for this sample.
 
-## 통제 입력 검증
+## Controlled-input validation
 
-첫 JPEG를 참조와 현재 프레임에 동일하게 사용한 결과는 다음과 같다. 실제 정적 장면 샘플의 측정값과 구분한다.
+The first JPEG was used as both reference and current frame. These are controlled inputs, not measurements of a real static scene.
 
-| 입력 | JXL 페이로드 | 계수 P 페이로드 |
+| Input | JXL payload | Coefficient P payload |
 | --- | ---: | ---: |
-| 완전히 같은 첫 프레임 | 47,657바이트 | 40,942바이트 |
-| AC 계수 하나의 부호를 반전한 프레임 | 측정하지 않음 | 40,948바이트 |
+| Identical first frame | 47,657 bytes | 40,942 bytes |
+| One AC coefficient with its sign reversed | Not measured | 40,948 bytes |
 
-두 P 입력 모두 원래 JPEG 바이트를 정확히 복원했다. 이는 참조 및 잔차 경로가 동작함을 검증하며 일반 영상에서의 효율을 보장하지 않는다. 동일 프레임에서도 심벌과 헤더를 그대로 보존하는 비용이 커서 개선 여지가 있다.
+Both P inputs reconstructed the exact JPEG bytes. This validates the reference/residual path without establishing efficiency on ordinary video. Preserving headers and symbols still has considerable cost even for identical frames.
 
-별도 프로세스에서 혼합 아카이브를 원본 MOV로 복원하여 바이트 비교를 통과했다. 마지막 바이트가 잘린 아카이브와 페이로드가 손상된 아카이브를 모두 거부했다.
+A separate process restored the hybrid archive to MOV and passed byte comparison. Both a truncated archive and a corrupted payload were rejected.
 
-## 후속 실험
+## Further experiments
 
-정적인 배경이 있는 실제 영상이 추가되면 동일 구현과 GOP 조건으로 비교한다. 개선 후보는 심벌 스트림의 참조 압축, 계수 주파수별 배열과 압축 모델, 움직임 보상이다. 현재 아카이브는 연구용이며 FFmpeg와 팟플레이어에서 직접 재생할 수 없다.
+Compare actual static-background footage using the same implementation and GOP. Candidate improvements include reference compression of symbols, frequency-specific coefficient layout/models, and motion compensation. These are research archives, not playable FFmpeg or PotPlayer containers; native MJXL AVI is a separate implementation.

@@ -1,118 +1,131 @@
-# 프로젝트 점검 기록
+# Project status and validation history
 
-2026-11-05에 기존 문서, 소스, 빌드 산출물 및 검증 보고서를 점검했다. 별도의 기존 워크로그는 발견하지 못했다. 아래 성능과 통과 결과는 기존 기록이며 이번 점검에서 재실행한 결과가 아니다.
+**English** | [Korean](STATUS.ko.md)
 
-## 현재 구현
+This record was assembled on 2026-11-05 from existing documents, sources, build artifacts, and reports. Unless an entry explicitly says otherwise, its numbers describe earlier tests, not tests rerun while translating this document. No separate work log existed at the initial review; current work is recorded in [doc/WORKLOG.md](doc/WORKLOG.md).
 
-- Python 연구 도구는 JPEG 패킷과 나머지 MOV 구간을 보존하여 원본 MOV 전체 바이트를 복원한다.
-- 네이티브 도구는 libjxl의 JPEG 가역 재압축으로 독립 JXL 프레임을 만들고 MJXL FourCC의 AVI에 저장한다. PCM은 기본적으로 그대로 복사하고, `--flac` 지정 시 8/16/24비트 PCM을 FLAC으로 무손실 압축한다. 32비트 PCM은 항상 PCM으로 둔다.
-- 네이티브 restore-original은 원본 파일 전체를 바이트 단위로 복원한다. restore는 JPEG와 PCM을 MJPEG AVI로 만들며 원본 컨테이너를 재현하지 않는다.
-- DirectShow 필터는 JXL을 RGB24로 직접 디코딩한다. CLI, 필터 및 그래프 검사 실행 파일이 dist/Release에 남아 있다.
+## Current notes
 
-## 기존 검증 기록
+- The user confirmed that clearing the stale DirectShow filter cache resolved the earlier PotPlayer codec-selection problem. `native/install.cmd` now performs local installation, per-user registration, and cache clearing.
+- Windows builds now start at root `CMakeLists.txt`; generated solutions/projects are local artifacts excluded from Git. See the root README for the new build directory and `-ConfigureOnly`.
+- Periodic clicking in PotPlayer during PCM AVI playback of `IMG_20040402_034913` was traced to the 18-byte audio `strf` written by the native AVI writer. The writer now uses 16 bytes, and the user confirmed a newly encoded AVI sounds clean. AVIs encoded earlier keep the old header until re-encoded. Details are in the current work log.
+- FLAC is now the default audio storage at the user's request. `--copy-audio` replaces `--flac` and copies the source audio unchanged. Entries below that mention PCM as the default or the `--flac` option describe the earlier behavior.
+- English is the default language for source comments, script messages, and documents. Korean document copies use `.ko.md`.
 
-- 연구용 아카이브: 7개 원본 합계 60,631,892바이트에서 52,457,450바이트로 13.48% 절감했다. 전체 파일 바이트 및 SHA-256 일치 기록이 있다.
-- 프레임 간 사전 및 DCT 계수 예측은 현재 샘플에서 독립 JXL보다 불리했다. 혼합 모드는 P프레임을 선택하지 않았다.
-- 네이티브 보고서: 7개, 총 1,332프레임의 JPEG 및 556,392바이트 PCM 일치와 DirectShow 재생·중간 탐색 통과를 기록한다.
-- 네이티브 AVI 합계는 52,374,566바이트로 원본 대비 약 13.62% 절감했다.
-- 기존 픽셀 디코딩 측정은 30fps 샘플에서 JXL 4 worker 약 403fps이다. 메모리 입력 기준이며 화면 출력 성능은 포함하지 않는다.
+## Implemented functionality
 
-## 후속 확인 사항
+- Python research tools preserve JPEG packets and the remaining MOV regions to reconstruct the complete original MOV byte for byte.
+- Native tools use libjxl reversible JPEG recompression to store independent JXL frames in `MJXL` AVI. PCM is copied by default; `--flac` losslessly compresses 8/16/24-bit PCM. Original 32-bit PCM always remains PCM.
+- Native `restore-original` reconstructs the entire original file byte for byte. `restore` creates an MJPEG AVI from the preserved JPEG/PCM data without recreating the original container.
+- The DirectShow filter decodes JXL directly to RGB24. The CLI, filter, and graph-test executables were present in `dist/Release` during the original review.
 
-- 현 PC에서 빌드를 재현하지 않았다. CMakeLists.txt에 이전 사용자 peperu의 JXL_ROOT 기본 경로가 남아 있다. build.ps1은 현재 USERPROFILE 경로를 전달한다.
-- README와 RESULTS 일부는 연구 도구 단계의 재생 미지원 설명을 유지한다. 네이티브 단계의 지원 범위와 구분해서 읽어야 한다.
-- 현재 네이티브 입력은 메모리에 적재한다. 출력은 2GiB 미만 classic AVI이며 OpenDML과 대용량 스트리밍 처리는 없다.
-- PCM8 mono 외 오디오 포맷, 다양한 타임스탬프와 손상 입력에 대한 검증 확대가 필요하다. JPEG·PCM 바이트 비교만으로 모든 타이밍과 화면 색상 일치까지 입증하지는 않는다.
-- 프레임별 jbrd 박스는 파일의 약 1.17%이며 대부분 중복이다. 공유 테이블로 옮기면 약 1.1%를 더 줄일 수 있다는 추정이 있으나, 프레임별 독립 JXL 구조를 유지하기 위해 하지 않기로 했다.
+## Initial validation records
 
-## 저장소
+- Research archives: seven originals totaling 60,631,892 bytes became 52,457,450 bytes, saving 13.48%. Full-file byte and SHA-256 comparisons passed.
+- Dictionary and DCT-coefficient inter-frame prediction were worse than independent JXL on these samples. Hybrid mode selected no P frames.
+- Native reports: seven files / 1,332 frames passed exact JPEG and 556,392-byte PCM comparisons, DirectShow playback, and midpoint seeking.
+- Initial native AVI total: 52,374,566 bytes, approximately 13.62% smaller than the originals.
+- Earlier RGB decoding measurements reached approximately 403 fps with four JXL workers on the 30 fps sample. Inputs were in memory; rendering was excluded.
 
-Git 저장소를 새로 초기화했다. samples, results, 의존성, 빌드 산출물 및 영상 확장자를 제외한다. 원본 및 변환 샘플 영상은 추가하지 않는다.
+## Initial follow-up items
 
+- At the initial review, the build had not been reproduced on that PC. An old user-specific JXL_ROOT default remained in CMake; later entries record its removal.
+- Some README/RESULTS text still described research archives without playback support; distinguish that format from native AVI.
+- Inputs are held in memory and output is classic AVI below 2 GiB. OpenDML and large-file streaming are not implemented.
+- Expand testing beyond PCM8 mono to other audio formats, timestamps, and malformed inputs. JPEG/PCM byte comparison alone does not prove timing or displayed-color equality.
+- Per-frame `jbrd` boxes account for approximately 1.17% of file size and are mostly repetitive. Sharing tables was estimated to save another roughly 1.1%, but was deliberately not implemented to preserve independent JXL frames.
 
-## 다른 PC 빌드 및 재생 점검: 2026-11-05
+## Repository
 
-- 현재 PC의 VS2026 18.11, MSVC 19.51, Windows SDK 10.0.26100, VS 번들 CMake 4.3.1로 x64 Release 빌드를 완료했다. 이전 캐시와 분리한 _build/vs2026-cymon을 사용했다.
-- FFMPEG_SDK=c:\sdk\ffmpeg 환경의 FFmpeg 9.0.2 SDK를 사용했다. 빌드 도구는 FFMPEG_SDK를 우선하고 기존 FFMPEG_PATH도 지원하도록 수정했다. 과거 사용자 JXL SDK 경로를 제거했다.
-- 현재 사용자에게 dist/Release/mjxl_decoder.ax를 등록했다. 덤프 검사에서 디코더의 동적 의존성은 Windows 시스템 DLL 세 개뿐이다. 디코더 설치 자체에 FFmpeg나 Python은 필요하지 않는다.
-- 기존 7개 AVI 모두 새 실행 파일로 JPEG·PCM 바이트 일치와 DirectShow 재생·중간 탐색 검사를 통과했다.
-- 첫 샘플을 새로 인코딩하고 MJPEG AVI로 복원하여 JPEG 28프레임과 PCM 15,008바이트 일치를 검증했다. 생성 파일은 results/native-current-pc에만 저장하여 Git에서 제외했다.
-- 그래프 검사기에 --registered와 --auto 옵션을 추가했다. COM 등록 경로와 DirectShow 자동 필터 선택 모두 재생·탐색에 성공했다. 자동 선택 검사는 ActiveMovie 창으로 실제 출력되었으며 사용자가 재생을 확인했다.
-- 팟플레이어 내부 파일 열기로 재생 성공을 확인했다. 재생 정보에서 MJXL JPEG XL Decoder가 사용 중임을 확인했다.
-- 사용자 설명상 탐색기 더블클릭은 Windows 기본 플레이어로 열렸으며, 보내기로 팟플레이어에 전달한 실행에서 MJXL 코덱 필요 오류가 발생했다. 레거시 파일 연결 레지스트리 값만으로 실제 기본 앱을 판단해서는 안 된다.
-- 이후 팟플레이어를 새로 실행해 내부 열기로 재생했고 사용자도 정상임을 확인했다. 15fps 재생목록과 30fps 영상의 후속 재생도 확인했다. 보내기 실행 실패의 원인은 미확정이며 해결 완료로 판단하지 않는다.
-- Windows 기본 플레이어와 탐색기 썸네일·미리보기 지원은 미검증이다. 현재 DirectShow 필터 등록과 별도 수용 기준으로 관리한다. 손쉬운 배포용 설치 패키지, 다른 미디어 경로 지원, 32비트 지원은 후속 작업이다.
+The Git repository was initialized during the earlier work. Samples, results, dependencies, build outputs, and video extensions are excluded. Do not add source or converted videos. Generated Visual Studio files are now excluded as described above.
 
-## 현재 사용자용 등록 대조 실험: 2026-11-05
+## Build and playback on another PC: 2026-11-05
 
-사용자 요청에 따라 모든 사용자용 MJXL COM·필터 등록을 제거하고 현재 사용자용으로 등록했다. 기존 등록과 ActiveMovie 캐시는 results/user-scope-*에 백업했다. 등록 변경 직후 필터 캐시 키가 없는 상태에서 재생 검사를 실행했다.
+- Completed x64 Release with VS2026 18.11, MSVC 19.51, Windows SDK 10.0.26100, and VS-bundled CMake 4.3.1. Used `_build/vs2026-cymon`, separate from the old cache.
+- Used FFmpeg 9.0.2 SDK via `FFMPEG_SDK=c:\sdk\ffmpeg`. Build scripts now prefer FFMPEG_SDK while accepting FFMPEG_PATH. Removed the old user-specific JXL SDK path.
+- Registered `dist/Release/mjxl_decoder.ax` for the current user. Dependency inspection showed only three Windows system DLLs; installing the decoder itself does not require FFmpeg or Python.
+- All seven existing AVIs passed JPEG/PCM byte comparisons, DirectShow playback, and midpoint seeking with the new binaries.
+- Newly encoded and restored the first sample, verifying 28 JPEG frames and 15,008 PCM bytes. Outputs were kept under ignored `results/native-current-pc`.
+- Added `--registered` and `--auto` graph tests. COM registration and automatic DirectShow selection passed playback/seeking. The automatic test displayed an ActiveMovie window, and the user confirmed playback.
+- PotPlayer internal file opening worked, and playback information identified MJXL JPEG XL Decoder.
+- The user reported that Explorer double-click opened the Windows default player, while sending a file to PotPlayer produced a missing-MJXL error. Legacy association registry entries alone do not prove the actual default application.
+- A fresh PotPlayer instance then played through internal file opening, including 15 fps playlist items and a 30 fps file. At that point the send-to failure remained unexplained; later cache experiments and user confirmation supersede that uncertainty.
+- Windows default-player and Explorer thumbnail/preview support had not been established. Treat them separately from DirectShow acceptance. Packaging, other media paths, and 32-bit support remained follow-up work.
 
-시스템 32·64비트 MJXL COM 등록이 모두 없음을 확인했다. 현재 사용자용 등록 경로 검사와 DLL 사전 로드 없는 자동 선택 검사는 각각 28프레임 재생·15프레임 탐색을 통과했다. 재생성된 Filter Cache64에 MJXL 문자열이 포함되었다. 새로 실행한 팟플레이어에서 30fps 샘플의 실제 영상 재생과 mjxl_decoder.ax 로드를 확인했다. 따라서 이 PC에서 모든 사용자용 등록은 재생의 필수 조건이 아니다. 이번 화면의 썸네일은 기존 썸네일 캐시일 수 있으므로 새 썸네일 생성 검증으로 간주하지 않는다. 다른 계정과 PC까지 일반화하지 않는다.
+## Per-user registration comparison: 2026-11-05
 
-## Media Foundation 구현 보류 상태: 2026-11-05
+At the user request, removed all-user MJXL COM/filter registrations and registered only for the current user. Earlier registrations and ActiveMovie caches were backed up in `results/user-scope-*`. Playback tests began with the filter-cache key absent.
 
-MJXL MFT와 검사기, 데스크톱 등록 스크립트 및 Media Player용 MSIX 패키지 소스를 구현했다. 로컬 MFT 검사에서 기존 7개 AVI의 총 1,332프레임, 탐색, 타임스탬프 및 오류 처리 검사를 통과했다. 데스크톱 전역 등록 경로에서도 585프레임 검사를 통과했다. 그러나 Media Player에서는 지원하지 않는 MJXL 오류가 남아 실제 재생 성공을 확인하지 못했다.
+Confirmed no system-wide 32-bit or 64-bit MJXL COM registration. Per-user registered creation and automatic selection without DLL preloading each passed 28-frame playback and 15-frame seeking. The recreated Filter Cache64 contained MJXL. A fresh PotPlayer displayed the 30 fps sample and loaded `mjxl_decoder.ax`. All-user registration was therefore not required on that PC. Thumbnails visible during that test may have come from an existing cache and did not prove new thumbnail generation. Do not generalize to other accounts or PCs.
 
-WinRT 활성화와 windows.mediaCodec 확장을 포함한 개발용 패키지를 생성하고 30일짜리 자체 서명 인증서로 서명했다. 사용자가 설치 보류를 요청하여 신뢰 인증서 등록과 MSIX 설치는 실행하지 않았다. 개발 인증서는 현재 사용자 My 저장소에 있으며 신뢰 저장소에는 등록하지 않았다. 앞서 설치한 데스크톱 MFT는 남아 있다. 당분간 DirectShow를 사용하며, MFT 구현과 패키지는 후속 조사용으로 보관한다. 패키지 생성이나 Source Reader 검사 성공을 Media Player 지원 완료로 해석해서는 안 된다.
+## Media Foundation implementation on hold: 2026-11-05
 
-## MFT 검토와 결함 수정: 2026-11-05
+Implemented an MJXL MFT, test tool, desktop registration script, and Media Player MSIX sources. Local MFT tests passed 1,332 frames from seven AVIs, seeking, timestamps, and error handling. A globally registered desktop path passed 585 frames. Media Player still reported unsupported MJXL; actual Media Player playback was not confirmed.
 
-전역 등록 없이 불러온 MFT로 데스크톱 Media Engine에서 재생, 종료 후 탐색과 재생을 오류 없이 통과했고 재생 화면이 정상 방향임을 확인했다. Media Player 미지원은 Media Foundation 경로 호환 문제가 아닐 가능성이 높으나, MSIX를 설치하지 않아 확정하지 못했다.
+Created a development package with WinRT activation and a `windows.mediaCodec` extension, signed with a 30-day self-signed certificate. The user deferred installation, so neither trust-store registration nor MSIX installation was performed. The certificate is in the current-user My store, not a trusted store. The desktop MFT remained installed. DirectShow remains the current playback path; retain MFT/package sources for investigation. Package creation or Source Reader success does not establish Media Player support.
 
-두 결함을 재현하여 수정했다. 완료된 드레인 뒤 flush 없이 들어온 입력을 거부하던 문제를 고쳤다. 스트라이드를 생략한 RGB32 출력 형식은 Media Foundation 기본값인 아래에서 위 방향으로 출력하고, 음수 스트라이드도 지원하며, 현재 출력 형식에 실제 스트라이드를 명시한다.
+## MFT review and fixes: 2026-11-05
 
-mjxl_mft_test에 스트라이드 세 경우와 드레인 재개 검사를 추가했다. 로컬 MFT 경로로 기존 7개 AVI의 총 1,332프레임을 통과했다. 전역 등록 경로는 재검증하지 않았다. 이후 register_mft.ps1을 다시 실행하여 C:\Program Files\MJXL\MFT\2DC5A95EDC7AF1AE의 수정본이 등록되었으며 해시가 현재 빌드와 같다. 이전 설치본 폴더 292459DB87F6D2CF는 남아 있으나 등록되어 있지 않다.
+An MFT loaded without global registration passed desktop Media Engine playback, end-of-stream seeking, and replay without errors; the displayed orientation was correct. Media Player failure may therefore involve activation/deployment rather than basic Media Foundation compatibility, but this was not confirmed because the MSIX was not installed.
 
-## FLAC 음성 저장: 2026-11-05
+Reproduced and fixed two defects: input was rejected after completed draining unless flushed, and RGB32 output without an explicit stride did not follow the Media Foundation bottom-up default. Negative strides are now supported, and the current output type reports its actual stride.
 
-mjxl encode에 FLAC 음성 저장을 추가했다. 절감이 작아 사용자 요청에 따라 기본값은 PCM으로 두고 `--flac`으로 켠다. FFmpeg FLAC 인코더는 s16과 s32만 받으므로 8비트 PCM은 상위 바이트에 옮긴 16비트 FLAC으로 저장한다. 원래 PCM 비트는 hdrl 안의 mjxa 청크에 기록하며, 이 청크가 없는 FLAC AVI는 복원을 거부한다. libFLAC을 쓰면 8비트 그대로 저장할 수 있으나 외부 의존성 추가를 보류했다. 32비트 PCM은 PCM으로 유지한다.
+Added three stride cases and drain/resume tests to `mjxl_mft_test`. Local MFT tests passed all seven AVIs / 1,332 frames. Global registration was not retested at that point. Reran `register_mft.ps1`, registering the fixed binary at `C:\Program Files\MJXL\MFT\2DC5A95EDC7AF1AE`; its hash matched the current build. The older `292459DB87F6D2CF` directory remained but was no longer registered.
 
-7개 샘플 합계는 PCM AVI 52,374,566바이트에서 FLAC AVI 52,183,508바이트로 191,058바이트(0.365%) 줄었다. 원본 대비 절감률은 13.62%에서 13.93%가 되었다. 블록 크기는 FFmpeg 기본값이 아니라 16kHz 이하 2048, 그 위 4096 표본을 사용한다.
+## Optional FLAC audio storage: 2026-11-05
 
-1,332프레임의 JPEG와 556,392바이트 PCM 일치, DirectShow 재생·탐색을 통과했다. 16·24비트 1~8채널과 8비트 stereo 합성 음성의 복원과 FFmpeg 독립 디코딩 일치, 32비트 PCM 유지, 기존 PCM AVI의 verify·restore, 손상된 FLAC 프레임과 메타데이터 없는 FLAC AVI의 거부를 확인했다.
+Added FLAC to `mjxl encode`. Because total savings were small, the user requested PCM as the default and `--flac` as opt-in. FFmpeg FLAC accepts s16/s32, so original PCM8 is stored in the upper byte of 16-bit FLAC. Original depth is recorded in an `mjxa` chunk inside `hdrl`; FLAC AVI without it is rejected during restoration. libFLAC could store 8-bit directly, but adding that dependency was deferred. Original PCM32 remains PCM.
 
-Windows AVI Splitter는 nBlockAlign이 프레임당 표본 수가 아니면 FLAC 스트림 길이를 잘못 계산하여 탐색이 실패했다. 이 값을 프레임 표본 수로 기록하여 해결했다. 이 FLAC에 대한 DirectShow 디코더가 없으므로 Windows 자체 DirectShow 자동 재생에서는 음성이 연결되지 않는다.
+Across seven samples, PCM AVI totaled 52,374,566 bytes and FLAC AVI 52,183,508 bytes, a reduction of 191,058 bytes (0.365%). Savings against the originals improved from 13.62% to 13.93%. Block sizes are 2,048 samples at rates up to 16 kHz and 4,096 above that, instead of FFmpeg defaults.
 
-팟플레이어에서 FLAC AVI의 영상 표시, 디코더 로드와 음성 세션 신호를 확인했다. 시스템 음소거 상태에서 측정했으므로 귀로 들은 음질과 영상 싱크는 미확인이다. FLAC과 PCM의 세션 피크는 시간대별로 일치하고 FLAC이 약 0.75% 높다. 파일 표본은 전부 (u8-128)×256과 일치하므로 파일의 스케일링은 아니다. 이전에 보인 큰 피크 차이는 폴더의 다음 영상까지 재생된 측정 오류였다. 탐색기 썸네일도 새 파일에서 생성되었다.
+Tests passed exact JPEG reconstruction for 1,332 frames, 556,392 PCM bytes, and DirectShow playback/seeking. Synthetic 16/24-bit audio with 1-8 channels and 8-bit stereo passed restoration and independent FFmpeg decoding. Confirmed PCM32 passthrough, verify/restore of existing PCM AVI, and rejection of corrupt FLAC frames or missing audio metadata.
 
-Windows Media Foundation의 AVI 소스는 AVI 안의 FLAC을 읽을 때 멈춘다. Source Reader의 음성 읽기와 Media Engine 재생이 모두 멈추고 FFmpeg가 만든 FLAC AVI에서도 같다. 같은 음성과 영상의 MKV는 Media Engine 재생과 썸네일을 통과했다. Media Foundation 경로에는 PCM AVI 또는 MKV를 사용해야 한다. MKV 출력은 구현하지 않았다.
+Windows AVI Splitter calculated incorrect FLAC stream lengths and failed seeking when nBlockAlign did not describe samples per frame. Recording samples per FLAC frame fixed that behavior. Windows DirectShow has no built-in decoder for this FLAC stream, so its audio is not connected by automatic Windows graph playback.
 
-## 원본 파일 복원: 2026-11-05
+PotPlayer displayed FLAC AVI, loaded the decoder, and produced audio-session signals. Measurements were made while system audio was muted, so audible quality and A/V sync were not confirmed. FLAC and PCM session peaks tracked over time, with FLAC approximately 0.75% higher. File samples all matched `(u8-128)*256`, so the discrepancy was not file scaling. An earlier large peak difference came from accidentally measuring the next playlist video.
 
-mjxl encode가 영상·음성 패킷을 뺀 나머지 원본 바이트, 패킷 배치와 SHA-256을 AVI 끝의 mjxo 청크에 저장한다. 나머지 바이트와 배치는 libjxl이 이미 포함하는 Brotli로 압축한다. restore-original은 저장된 패킷과 이 청크로 원본을 재구성하고 해시를 검사한다.
+New-file Explorer thumbnails were generated. However, Media Foundation AVI sources stalled when reading FLAC: both Source Reader audio reads and Media Engine playback stalled, also with FFmpeg-created FLAC AVI. The same streams in MKV passed Media Engine playback and thumbnail creation. Use PCM AVI or MKV for that path; native MKV output was not implemented.
 
-7개 샘플 모두 PCM과 --flac 저장에서 복원 파일이 원본과 SHA-256으로 일치했다. 합계 비용은 35,882바이트이고 PCM AVI 합계는 52,410,448바이트로 원본 대비 13.56% 절감이다. --flac은 52,219,390바이트로 13.87%이다. 연구용 아카이브의 13.48%보다 작다.
+## Complete original-file recovery: 2026-11-05
 
-앞부분 moov, 추가 메타데이터, 조각 MOV, 음성 없는 MOV, 파일 끝 추가 바이트, AVI 입력, 16·24·32비트 PCM에서도 바이트 일치를 확인했다. 청크의 버전·크기·해시·표·나머지 바이트 손상, 과대한 크기와 패킷 수, 잘린 파일, 손상된 영상 프레임을 거부하고 출력을 남기지 않음을 확인했다.
+`mjxl encode` now stores the original bytes outside audio/video packets, packet placement, and SHA-256 in a trailing `mjxo` chunk. The non-packet bytes and layout are compressed with Brotli already available through libjxl. `restore-original` rebuilds the source from those data and the preserved packets, then checks its hash.
 
-mjxo 청크를 포함한 AVI는 FFmpeg, Windows DirectShow 자동 그래프, Media Foundation 검사와 Media Engine 재생, 팟플레이어, 새 썸네일 생성에서 정상이다. 복원 정보를 만들 수 없으면 encode가 실패하며 --no-original로만 생략할 수 있다. verify는 이 청크가 없으면 --no-original 없이는 실패한다. 이전에 만든 AVI에는 이 청크가 없어 원본을 복원할 수 없다. 원본을 지우기 전에는 새로 인코딩한 파일을 verify로 확인해야 한다.
+All seven samples restored with matching SHA-256 from both PCM and FLAC storage. Total added cost was 35,882 bytes. PCM AVI totaled 52,410,448 bytes (13.56% savings); FLAC totaled 52,219,390 bytes (13.87%), both smaller than the research archive at 13.48% savings.
 
-음성 없는 입력에서 FLAC 구현 때 들어간 0으로 나누기 오류가 발견되어 수정했다. 이 오류는 커밋 8e6c14f에 포함되어 있었다.
+Verified exact bytes for front-moov files, additional metadata, fragmented MOV, silent MOV, trailing file bytes, AVI inputs, and 16/24/32-bit PCM. Rejected corrupt chunk version/size/hash/tables/remainder bytes, excessive sizes or packet counts, truncated input, and corrupt video frames without leaving output files.
 
-## JXL 압축 강도 선택: 2026-11-05
+AVI containing `mjxo` passed FFmpeg, automatic DirectShow graphs, Media Foundation tests, Media Engine playback, PotPlayer, and fresh thumbnail generation. Encoding fails if recovery information cannot be created; only `--no-original` omits it. Verify rejects files without that information unless `--no-original` is supplied. Earlier AVIs lack the chunk and cannot recover the original container. Verify a newly encoded file before deleting its source.
 
-mjxl encode에 -e, --effort 1-10을 추가했다. 기본값은 기존과 같은 7이며 결과가 기존 출력과 같다. 옵션은 명령 뒤 어느 위치에나 쓸 수 있고 명령 앞에는 쓸 수 없으며, 해당 명령에서 쓰지 않는 옵션은 거부한다. encode가 끝나면 절감 퍼센트를 표시한다. 28프레임 샘플에서 1, 3, 5, 7, 8, 9, 10 모두 원본 복원이 일치했다. 출력은 7이 1,126,022바이트, 8이 1,124,182바이트, 9가 1,122,746바이트, 10이 1,124,410바이트이며 인코딩 시간은 각각 0.6초, 1.1초, 9.6초, 11.3초이다.
+A divide-by-zero defect for silent input, introduced with FLAC support in commit `8e6c14f`, was found and fixed.
 
-## 명령줄 정리와 Linux 빌드: 2026-11-05
+## JPEG XL effort selection: 2026-11-05
 
-명령과 옵션의 정의를 cli.cpp의 표로 모아 파싱과 -h, --help 출력을 함께 만든다. 외부 인자 처리 라이브러리는 추가하지 않았다. 내부 문자열을 UTF-8로 통일하고 Windows 전용 코드는 wmain 진입점으로 제한했다. Windows 빌드에서 한글 경로의 인코딩과 원본 복원을 확인했다.
+Added `-e` / `--effort 1-10` to encode, defaulting to the prior setting 7 with identical output. Options can appear anywhere after the command but not before it; options unsupported by a command are rejected. Encode reports its savings percentage.
 
-native/Makefile로 시스템의 FFmpeg, libjxl, Brotli를 사용해 mjxl을 빌드한다. WSL Ubuntu 24.04의 g++ 13에서 cli.cpp를 빌드해 명령줄 규칙을 확인했고, 나머지 소스는 패키지 헤더로 경고 없이 컴파일 검사를 통과했다. 패키지를 설치하지 않아 전체 링크와 실제 인코딩·복원은 Linux에서 미검증이다. 이 Ubuntu의 libjxl은 0.7.0이어서 Windows에 포함된 0.11.2와 압축 결과가 다를 수 있다. validate_native.py는 Windows 실행 파일 경로와 DirectShow 검사를 전제로 하므로 Linux에서 쓰지 않는다.
+For the 28-frame sample, efforts 1, 3, 5, 7, 8, 9, and 10 all restored the exact source. Sizes at 7/8/9/10 were 1,126,022 / 1,124,182 / 1,122,746 / 1,124,410 bytes, respectively, with times of 0.6 / 1.1 / 9.6 / 11.3 seconds. These are measurements for that run, not universal monotonic size guarantees.
 
-## 로컬 설치: 2026-11-05
+## CLI cleanup and initial Linux compilation: 2026-11-05
 
-native/install.cmd와 install.ps1을 추가했다. 작업 드라이브가 영속적이지 않으므로 디코더와 도구를 %LOCALAPPDATA%\MJXL로 복사하고 현재 사용자용으로 등록한 뒤 필터 캐시를 지운다. FFmpeg DLL은 가져오기 이름을 따라가 avcodec, avformat, avutil, swresample만 복사하며 합계는 약 132MB이다. 제거는 설치 기록에 있는 파일만 지운다.
+Moved command/option definitions into tables in `cli.cpp` shared by parsing and help. No argument-parsing dependency was added. Internal text is UTF-8; Windows-specific argument handling is confined to `wmain`. Windows encode and exact restoration passed with Korean paths.
 
-이 PC의 등록을 W: 경로에서 로컬 복사본으로 옮겼다. 등록 경로와 자동 필터 선택 재생·탐색, 팟플레이어의 로컬 디코더 로드, 시스템 PATH만 둔 mjxl.exe의 인코딩·verify·원본 복원, 새 썸네일 생성을 확인했다. 드라이브를 실제로 분리한 시험과 다른 PC 시험은 하지 않았다. 이 PC의 썸네일은 Program Files의 MFT로 생성된다. 다시 빌드하면 install.cmd를 다시 실행해야 한다.
+`native/Makefile` builds the CLI with system FFmpeg, libjxl, and Brotli. Initial GCC 13 checks on WSL Ubuntu 24.04 compiled the CLI parser and checked all remaining sources without warnings using package headers. At that stage packages were not installed, so full linking/execution was unverified. That Ubuntu provided libjxl 0.7.0 rather than Windows 0.11.2, potentially changing compression sizes. `validate_native.py` assumes Windows executables and DirectShow; do not use it for Linux.
 
-## Linux CLI 실행 검증: 2026-11-05
+## Permanent local installation: 2026-11-05
 
-WSL2 Ubuntu 24.04 x86-64에 libjxl-dev, libbrotli-dev, libavformat-dev 등 필요한 개발 패키지를 설치하고 GCC 13으로 CLI 전체를 경고 없이 컴파일·링크했다. libjxl 0.7.0, FFmpeg 6.1.1, Brotli 1.1.0을 사용하며 시스템 공유 라이브러리에 연결한다. Windows 전용 필터나 Linux 재생 플러그인은 설치하지 않는다.
+Added `native/install.cmd` and `install.ps1`. Because the checkout drive may be removable, installation copies tools/decoder to `%LOCALAPPDATA%\MJXL`, registers per user, and clears the filter cache. FFmpeg DLL imports are followed to copy only required avcodec/avformat/avutil/swresample libraries, totaling approximately 132 MB. Uninstall removes manifest-recorded files only.
 
-native/validate_cli.py로 7개 샘플의 PCM·FLAC 총 14개 변환과 verify, restore-original을 실행했다. 매 복원 파일의 SHA-256이 원본과 일치했다. 각 모드의 영상은 총 1,332프레임이며 검증 보고서는 results/linux-validation/cli-report.json에 저장했다. 첫 FLAC 파일의 MJPEG AVI 복원과 RGB 디코딩도 통과했다. Windows에서 만든 FLAC MJXL AVI를 Linux에서 verify·원본 복원했고, Linux에서 만든 첫 FLAC AVI도 Windows CLI의 verify를 통과했다. 전체 파일 조합이나 Linux 플레이어 재생까지 검증한 것은 아니다.
+Moved registration from W: to the local copy. Confirmed registration path, automatic filter selection, playback/seeking, PotPlayer local-DLL loading, CLI encode/verify/original recovery with system PATH only, and fresh thumbnails. Physical drive removal and another-PC installation were not tested then. Thumbnails on that PC used the Program Files MFT. Rerun install after rebuilding.
 
-Linux 빌드·사용법을 영문 README와 네이티브 문서에 추가했다. 실행 파일은 dist/linux/mjxl이며 Git에서 제외한다. 배포판별 공유 라이브러리에 의존하므로 모든 Linux 배포판에 통용되는 단일 바이너리로 간주하지 않는다.
+## Linux CLI execution validation: 2026-11-05
 
-## Linux FFmpeg·ffplay 경로: 2026-11-05
+Installed required development packages in WSL2 Ubuntu 24.04 x86-64 and compiled/linked the complete CLI without warnings using GCC 13, libjxl 0.7.0, FFmpeg 6.1.1, and Brotli 1.1.0. It links system shared libraries. No Windows filters or Linux playback plugins were installed.
 
-Ubuntu 24.04의 FFmpeg 6.1.1 패키지를 설치했다. 포함된 libjxl 디코더를 입력 옵션으로 지정하여 Linux 변환 샘플 7개씩 PCM·FLAC 총 14개 AVI의 영상과 음성 전체를 오류 없이 디코딩했다. 각 모드 1,332프레임이며 보고서는 results/linux-validation/ffmpeg-report.json에 남긴다. ffplay도 -vcodec libjxl로 SDL 더미 영상·음성 출력에서 첫 PCM·FLAC 샘플의 끝까지 정상 종료했다. 실제 Linux 화면 표시·음성 청취나 탐색은 검증하지 않았다. FFmpeg 소스의 MJXL FourCC 매핑과 GStreamer 지원은 변경하지 않았다. 영문 README와 네이티브 문서에 명령과 검증 범위를 추가했다.
+`native/validate_cli.py` ran seven samples with both PCM and FLAC (14 encodes), verify, and restore-original. Every restored source matched SHA-256. Each mode contained 1,332 frames; reports are in `results/linux-validation/cli-report.json`. The first FLAC file also passed MJPEG AVI restoration and RGB decoding. Linux verified/restored a Windows FLAC AVI, and Windows verified the first Linux FLAC AVI. This did not cover every cross-platform combination or Linux player playback.
+
+Linux build/use guidance was added to the English README and native guide. The ignored executable is `dist/linux/mjxl`; its distribution-specific shared-library dependencies prevent treating it as a universal binary.
+
+## Linux FFmpeg and ffplay: 2026-11-05
+
+Installed Ubuntu 24.04 FFmpeg 6.1.1. Explicitly selecting its libjxl input decoder decoded all video/audio in seven PCM and seven FLAC AVIs without errors, 1,332 frames per mode. Reports are in `results/linux-validation/ffmpeg-report.json`.
+
+ffplay with `-vcodec libjxl` reached the end of the first PCM and FLAC samples with SDL dummy video/audio outputs. Actual Linux display, listening, and seeking were not verified. FFmpeg MJXL FourCC mapping and GStreamer support were not changed. Documentation records both commands and validation limits.

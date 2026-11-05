@@ -1,42 +1,44 @@
-# 전체 샘플 비교
+# Sample comparison
 
-저장 크기는 원본 음성·컨테이너 정보 보존 및 실험 아카이브 헤더를 포함한다. 절감률이 음수이면 원본보다 커진 것이다.
+**English** | [Korean](COMPARISON.ko.md)
 
-| 영상 | 프레임 | 원본(바이트) | JXL 절감률 | 계수 P 크기(원본 대비) | 혼합 P 선택 수 |
+Stored sizes include original audio, container preservation data, and experimental archive headers. Negative savings mean a larger file.
+
+| Video | Frames | Original bytes | JXL savings | Coefficient P size / original | Hybrid P frames |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| IMG_20040318_225819.MOV | 28 | 1,301,421 | 13.31% | 2.37배 | 0 |
-| IMG_20040320_230212.MOV | 167 | 7,889,241 | 12.87% | 2.52배 | 0 |
-| IMG_20040321_000945.MOV | 79 | 3,537,817 | 12.84% | 2.69배 | 0 |
-| IMG_20040322_025026.MOV | 181 | 8,014,661 | 12.83% | 2.29배 | 0 |
-| IMG_20040325_190603.MOV | 132 | 6,355,373 | 12.33% | 2.13배 | 0 |
-| IMG_20040326_055048.MOV | 160 | 6,529,405 | 19.74% | 2.46배 | 0 |
-| IMG_20060430_203434.MOV | 585 | 27,003,974 | 12.70% | 미지원(JXL 대체) | 0 |
+| IMG_20040318_225819.MOV | 28 | 1,301,421 | 13.31% | 2.37x | 0 |
+| IMG_20040320_230212.MOV | 167 | 7,889,241 | 12.87% | 2.52x | 0 |
+| IMG_20040321_000945.MOV | 79 | 3,537,817 | 12.84% | 2.69x | 0 |
+| IMG_20040322_025026.MOV | 181 | 8,014,661 | 12.83% | 2.29x | 0 |
+| IMG_20040325_190603.MOV | 132 | 6,355,373 | 12.33% | 2.13x | 0 |
+| IMG_20040326_055048.MOV | 160 | 6,529,405 | 19.74% | 2.46x | 0 |
+| IMG_20060430_203434.MOV | 585 | 27,003,974 | 12.70% | Unsupported (JXL fallback) | 0 |
 
-## 합계
+## Totals
 
-검증된 원본 파일은 7개이며 합계 60,631,892바이트이다.
+Verified 7 source files totaling 60,631,892 bytes.
 
-| 방식 | 저장 크기(바이트) | 절감률 |
+| Mode | Stored bytes | Savings |
 | --- | ---: | ---: |
 | jxl | 52,457,450 | 13.48% |
 | inter | 59,655,716 | 1.61% |
 | coeff | 103,953,662 | -71.45% |
 | hybrid | 52,457,450 | 13.48% |
 
-모든 표의 결과는 파일 전체 바이트 비교 및 SHA-256 검증을 통과했다. 계수 P는 움직임 보상이 없는 초기 기준선이다. 미지원 입력의 JXL 대체 결과를 합계에 포함하므로 계수 P 합계는 순수한 P프레임 성능이 아니다. 일반적인 프레임 간 가역 압축의 최적 성능을 나타내지 않는다.
+All results passed full-file byte comparison and SHA-256 verification. Coefficient P is an initial baseline without motion compensation. Its totals include JXL fallback for unsupported inputs and do not measure pure P-frame performance or the limits of reversible inter-frame compression.
 
-## 픽셀 디코딩 속도
+## Pixel-decoding throughput
 
-예열 후 메모리 내 입력을 RGB8 픽셀로 디코딩한 처리량이다. 3회 실행의 전체 처리량 중앙값을 사용한다. 디스크·음성·화면 출력·화질 보정은 제외한다. JXL 작업 스레드는 libjxl worker 수이며 전체 프로세스 스레드 수가 아니다. 동시 압축 행은 압축 실험과 동시 실행한 예비 측정값이다. 압축 종료 후 행은 압축 비교가 모두 끝난 뒤 측정했다.
+Inputs were decoded from memory to RGB8 after warmup. Throughput is the median of three runs. Disk access, audio, rendering, and restoration filters are excluded. JXL workers count libjxl workers, not all process threads. Concurrent measurements ran alongside compression; isolated measurements ran after compression completed.
 
-| 측정 파일 | 조건 | 원본 fps | 디코더 | 작업 스레드 | 디코딩 fps | p95 지연(ms) | 최대 지연(ms) |
+| Source | Conditions | Source fps | Decoder | Workers | Decode fps | p95 ms | Maximum ms |
 | --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
-| IMG_20060430_203434.MOV | 동시 압축 | 30 | mjpeg | 단일 | 803.4 | 1.63 | 3.13 |
-| IMG_20060430_203434.MOV | 동시 압축 | 30 | jxl | 단일 | 169.3 | 8.72 | 11.60 |
-| IMG_20060430_203434.MOV | 동시 압축 | 30 | jxl | 4 | 296.0 | 4.35 | 5.55 |
-| IMG_20060430_203434.MOV | 압축 종료 후 | 30 | mjpeg | 단일 | 912.6 | 1.29 | 1.69 |
-| IMG_20060430_203434.MOV | 압축 종료 후 | 30 | jxl | 단일 | 208.2 | 6.00 | 13.91 |
-| IMG_20060430_203434.MOV | 압축 종료 후 | 30 | jxl | 4 | 403.2 | 3.19 | 4.56 |
-| IMG_20040318_225819.MOV | 동시 압축 | 15 | mjpeg | 단일 | 825.6 | 미측정 | 미측정 |
-| IMG_20040318_225819.MOV | 동시 압축 | 15 | jxl | 단일 | 165.2 | 미측정 | 미측정 |
-| IMG_20040318_225819.MOV | 동시 압축 | 15 | jxl | 4 | 225.9 | 미측정 | 미측정 |
+| IMG_20060430_203434.MOV | Concurrent compression | 30 | mjpeg | Single | 803.4 | 1.63 | 3.13 |
+| IMG_20060430_203434.MOV | Concurrent compression | 30 | jxl | Single | 169.3 | 8.72 | 11.60 |
+| IMG_20060430_203434.MOV | Concurrent compression | 30 | jxl | 4 | 296.0 | 4.35 | 5.55 |
+| IMG_20060430_203434.MOV | After compression | 30 | mjpeg | Single | 912.6 | 1.29 | 1.69 |
+| IMG_20060430_203434.MOV | After compression | 30 | jxl | Single | 208.2 | 6.00 | 13.91 |
+| IMG_20060430_203434.MOV | After compression | 30 | jxl | 4 | 403.2 | 3.19 | 4.56 |
+| IMG_20040318_225819.MOV | Concurrent compression | 15 | mjpeg | Single | 825.6 | Not measured | Not measured |
+| IMG_20040318_225819.MOV | Concurrent compression | 15 | jxl | Single | 165.2 | Not measured | Not measured |
+| IMG_20040318_225819.MOV | Concurrent compression | 15 | jxl | 4 | 225.9 | Not measured | Not measured |

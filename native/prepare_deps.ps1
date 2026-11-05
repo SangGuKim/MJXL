@@ -7,17 +7,17 @@ New-Item -ItemType Directory -Path $dependencyRoot -Force | Out-Null
 $jxl = Join-Path $dependencyRoot 'libjxl'
 if (-not (Test-Path -LiteralPath $jxl)) {
     & git clone --depth 1 --branch v0.11.2 https://github.com/libjxl/libjxl.git $jxl
-    if ($LASTEXITCODE) { throw 'libjxl 다운로드가 실패했다.' }
+    if ($LASTEXITCODE) { throw 'Failed to download libjxl.' }
 }
 $jxlCommit = & git -C $jxl rev-parse HEAD
-if ($jxlCommit -ne '332feb17d17311c748445f7ee75c4fb55cc38530') { throw '예상하지 않은 libjxl 버전이다. 기존 의존성은 수정하지 않는다.' }
+if ($jxlCommit -ne '332feb17d17311c748445f7ee75c4fb55cc38530') { throw 'Unexpected libjxl version. Existing dependencies were not modified.' }
 & git -C $jxl submodule update --init --depth 1 third_party/brotli third_party/highway third_party/skcms
-if ($LASTEXITCODE) { throw 'libjxl 하위 의존성 다운로드가 실패했다.' }
+if ($LASTEXITCODE) { throw 'Failed to download libjxl submodules.' }
 $samples = Join-Path $dependencyRoot 'windows-samples'
 if (-not (Test-Path -LiteralPath $samples)) {
     & git clone --depth 1 --filter=blob:none --sparse https://github.com/microsoft/Windows-classic-samples.git $samples
-    if ($LASTEXITCODE) { throw 'DirectShow 기본 클래스 다운로드가 실패했다.' }
+    if ($LASTEXITCODE) { throw 'Failed to download the DirectShow base classes.' }
     & git -C $samples sparse-checkout set Samples/Win7Samples/multimedia/directshow/baseclasses
-    if ($LASTEXITCODE) { throw 'DirectShow 기본 클래스 선택이 실패했다.' }
+    if ($LASTEXITCODE) { throw 'Failed to select the DirectShow base classes.' }
 }
-Write-Output '의존성 준비를 완료했다.'
+Write-Output 'Dependency preparation completed.'

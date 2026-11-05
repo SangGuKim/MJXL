@@ -1,4 +1,4 @@
-"""메모리 내 MJPEG/JXL을 RGB8 픽셀로 디코딩하는 처리량을 측정한다."""
+"""Benchmark in-memory MJPEG and JXL decoding to RGB8 pixels."""
 import argparse
 import ctypes as C
 import json

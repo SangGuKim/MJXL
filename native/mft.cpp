@@ -248,7 +248,7 @@ STDMETHODIMP Decoder::SetOutputType(DWORD id, IMFMediaType* type, DWORD flags)
         GUID major{}, subtype{};
         UINT32 width = 0, height = 0, rawStride = 0;
         const LONG minimum = static_cast<LONG>(width_ * 4);
-        // 스트라이드를 생략한 RGB 형식은 Media Foundation 기본값인 아래에서 위 방향으로 처리한다.
+        // For RGB formats without an explicit stride, use the Media Foundation bottom-up default.
         stride = SUCCEEDED(type->GetUINT32(MF_MT_DEFAULT_STRIDE, &rawStride)) ? static_cast<LONG>(rawStride) : -minimum;
         if (FAILED(type->GetGUID(MF_MT_MAJOR_TYPE, &major)) || major != MFMediaType_Video ||
             FAILED(type->GetGUID(MF_MT_SUBTYPE, &subtype)) || subtype != MFVideoFormat_RGB32 ||
@@ -264,7 +264,7 @@ STDMETHODIMP Decoder::SetOutputType(DWORD id, IMFMediaType* type, DWORD flags)
             if (FAILED(hr)) { return hr; }
             hr = type->CopyAllItems(copy.Get());
             if (FAILED(hr)) { return hr; }
-            // 현재 형식을 조회하는 호출자도 실제 출력 방향을 알 수 있게 명시한다.
+            // Expose the actual output orientation to callers querying the current media type.
             hr = copy->SetUINT32(MF_MT_DEFAULT_STRIDE, static_cast<UINT32>(stride));
             if (FAILED(hr)) { return hr; }
         }
@@ -282,7 +282,7 @@ STDMETHODIMP Decoder::ProcessOutput(DWORD flags, DWORD count, MFT_OUTPUT_DATA_BU
     buffers[0].dwStatus = 0; buffers[0].pEvents = nullptr;
     if (!input_ || !output_) { return MF_E_TRANSFORM_TYPE_NOT_SET; }
     if (!pending_) {
-        // 남은 출력이 없으면 드레인이 끝난 것이므로 flush 없이도 다음 입력을 받는다.
+        // Once no output remains, draining is complete; accept new input without requiring a flush.
         draining_ = false;
         return MF_E_TRANSFORM_NEED_MORE_INPUT;
     }
@@ -312,7 +312,7 @@ STDMETHODIMP Decoder::ProcessOutput(DWORD flags, DWORD count, MFT_OUTPUT_DATA_BU
         BYTE* pixels = nullptr;
         hr = destination->Lock(&pixels, nullptr, nullptr);
         if (FAILED(hr)) { return hr; }
-        // 스트라이드 부호에 맞춰 위에서 아래 또는 아래에서 위 순서로 BGRX 픽셀을 출력한다.
+        // Output BGRX pixels top-down or bottom-up according to the stride sign.
         for (size_t y = 0; y < height_; ++y) {
             const size_t row = outputStride_ > 0 ? y : height_ - 1 - y;
             const uint8_t* from = rgb.data() + y * width_ * 3;
