@@ -56,19 +56,30 @@ static ComPtr<IMFSample> read(IMFSourceReader* reader, LONGLONG& time)
     }
     throw std::runtime_error("Too many empty video samples");
 }
-static void pixel_check(IMFSample* compressed, IMFSample* decoded, mjxl::Codec& codec, UINT32 width, UINT32 height)
+// 스트라이드 속성이 없으면 Media Foundation 규칙대로 아래에서 위 방향으로 해석한다.
+static LONG stride_of(IMFMediaType* type, UINT32 width)
+{
+    UINT32 raw = 0;
+    return SUCCEEDED(type->GetUINT32(MF_MT_DEFAULT_STRIDE, &raw)) ? static_cast<LONG>(raw) : -static_cast<LONG>(width * 4);
+}
+static void pixel_check(IMFSample* compressed, IMFSample* decoded, mjxl::Codec& codec, UINT32 width, UINT32 height, LONG stride)
 {
     const auto packet = bytes(compressed);
     const auto expected = codec.rgb(packet, width, height);
     const auto actual = bytes(decoded);
     require(actual.size() == size_t(width) * height * 4, "RGB32 output size mismatch");
-    for (size_t i = 0; i < size_t(width) * height; ++i) {
-        require(actual[i * 4] == expected[i * 3 + 2] &&
-                actual[i * 4 + 1] == expected[i * 3 + 1] &&
-                actual[i * 4 + 2] == expected[i * 3], "RGB32 pixels differ from core decoder");
+    for (size_t y = 0; y < height; ++y) {
+        const size_t row = stride > 0 ? y : height - 1 - y;
+        const uint8_t* to = actual.data() + row * width * 4;
+        const uint8_t* from = expected.data() + y * width * 3;
+        for (size_t x = 0; x < width; ++x) {
+            require(to[x * 4] == from[x * 3 + 2] &&
+                    to[x * 4 + 1] == from[x * 3 + 1] &&
+                    to[x * 4 + 2] == from[x * 3], "RGB32 pixels differ from core decoder");
+        }
     }
 }
-static void state_test(IClassFactory* factory, IMFMediaType* input)
+static ComPtr<IMFTransform> create_transform(IClassFactory* factory)
 {
     ComPtr<IMFTransform> transform;
     if (factory) {
@@ -76,6 +87,92 @@ static void state_test(IClassFactory* factory, IMFMediaType* input)
     } else {
         check(CoCreateInstance(kMjxlMft, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform)), "Registered transform");
     }
+    return transform;
+}
+static ComPtr<IMFSample> output_sample(IMFTransform* transform)
+{
+    MFT_OUTPUT_STREAM_INFO info{};
+    check(transform->GetOutputStreamInfo(0, &info), "Output buffer requirement");
+    ComPtr<IMFSample> sample;
+    ComPtr<IMFMediaBuffer> buffer;
+    check(MFCreateSample(&sample), "Output sample");
+    check(MFCreateMemoryBuffer(info.cbSize, &buffer), "Output buffer");
+    check(sample->AddBuffer(buffer.Get()), "Output add buffer");
+    return sample;
+}
+// 지정한 스트라이드 설정으로 한 프레임을 변환하여 방향과 현재 형식 속성을 확인한다.
+static void stride_case(IClassFactory* factory, IMFMediaType* input, IMFSample* packet, mjxl::Codec& codec, bool specified, LONG requested, LONG expected)
+{
+    UINT32 width = 0, height = 0;
+    check(MFGetAttributeSize(input, MF_MT_FRAME_SIZE, &width, &height), "Stride test dimensions");
+    auto transform = create_transform(factory);
+    check(transform->SetInputType(0, input, 0), "Stride test input");
+    ComPtr<IMFMediaType> available, output;
+    check(transform->GetOutputAvailableType(0, 0, &available), "Stride test available type");
+    check(MFCreateMediaType(&output), "Stride test type");
+    check(available->CopyAllItems(output.Get()), "Stride test copy");
+    if (specified) {
+        check(output->SetUINT32(MF_MT_DEFAULT_STRIDE, static_cast<UINT32>(requested)), "Stride test value");
+    } else {
+        check(output->DeleteItem(MF_MT_DEFAULT_STRIDE), "Stride test removal");
+    }
+    check(transform->SetOutputType(0, output.Get(), 0), "Stride test output");
+    ComPtr<IMFMediaType> current;
+    check(transform->GetOutputCurrentType(0, &current), "Stride test current type");
+    UINT32 actual = 0;
+    check(current->GetUINT32(MF_MT_DEFAULT_STRIDE, &actual), "Current type must state stride");
+    require(static_cast<LONG>(actual) == expected, "Current type stride mismatch");
+    check(transform->ProcessInput(0, packet, 0), "Stride test input sample");
+    auto target = output_sample(transform.Get());
+    MFT_OUTPUT_DATA_BUFFER out{0, target.Get(), 0, nullptr};
+    DWORD status = 0;
+    check(transform->ProcessOutput(0, 1, &out, &status), "Stride test output sample");
+    pixel_check(packet, target.Get(), codec, width, height, expected);
+}
+static void stride_test(IClassFactory* factory, IMFMediaType* input, IMFSample* packet, mjxl::Codec& codec)
+{
+    UINT32 width = 0, height = 0;
+    check(MFGetAttributeSize(input, MF_MT_FRAME_SIZE, &width, &height), "Stride dimensions");
+    const LONG minimum = static_cast<LONG>(width * 4);
+    stride_case(factory, input, packet, codec, true, minimum, minimum);
+    stride_case(factory, input, packet, codec, true, -minimum, -minimum);
+    stride_case(factory, input, packet, codec, false, 0, -minimum);
+    auto transform = create_transform(factory);
+    check(transform->SetInputType(0, input, 0), "Padded stride input");
+    ComPtr<IMFMediaType> output;
+    check(transform->GetOutputAvailableType(0, 0, &output), "Padded stride available type");
+    check(output->SetUINT32(MF_MT_DEFAULT_STRIDE, static_cast<UINT32>(minimum + 4)), "Padded stride value");
+    require(transform->SetOutputType(0, output.Get(), 0) == MF_E_INVALIDMEDIATYPE, "Unsupported stride must be rejected");
+}
+// 드레인을 끝낸 변환기는 flush 없이도 다음 입력을 받아야 한다.
+static void drain_test(IClassFactory* factory, IMFMediaType* input, IMFSample* packet)
+{
+    auto transform = create_transform(factory);
+    check(transform->SetInputType(0, input, 0), "Drain test input");
+    ComPtr<IMFMediaType> output;
+    check(transform->GetOutputAvailableType(0, 0, &output), "Drain test available type");
+    check(transform->SetOutputType(0, output.Get(), 0), "Drain test output");
+    check(transform->ProcessInput(0, packet, 0), "Input before drain");
+    check(transform->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0), "End of stream");
+    check(transform->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0), "Drain");
+    DWORD status = 0, flags = 0;
+    auto first = output_sample(transform.Get());
+    MFT_OUTPUT_DATA_BUFFER out{0, first.Get(), 0, nullptr};
+    check(transform->ProcessOutput(0, 1, &out, &status), "Drained output");
+    // 대기 샘플이 빠진 뒤에도 NEED_MORE_INPUT을 돌려주기 전까지는 드레인 중이다.
+    check(transform->GetInputStatus(0, &flags), "Input status while draining");
+    require(flags == 0, "Draining transform must not accept input");
+    require(transform->ProcessOutput(0, 1, &out, &status) == MF_E_TRANSFORM_NEED_MORE_INPUT, "Completed drain must request input");
+    check(transform->GetInputStatus(0, &flags), "Input status after drain");
+    require(flags == MFT_INPUT_STATUS_ACCEPT_DATA, "Completed drain must accept input");
+    check(transform->ProcessInput(0, packet, 0), "Input after drain without flush");
+    auto second = output_sample(transform.Get());
+    MFT_OUTPUT_DATA_BUFFER next{0, second.Get(), 0, nullptr};
+    check(transform->ProcessOutput(0, 1, &next, &status), "Output after drain without flush");
+}
+static void state_test(IClassFactory* factory, IMFMediaType* input)
+{
+    auto transform = create_transform(factory);
     check(transform->SetInputType(0, input, 0), "Set test input");
     ComPtr<IMFMediaType> output;
     check(transform->GetOutputAvailableType(0, 0, &output), "Test output format");
@@ -132,7 +229,21 @@ static void run(const wchar_t* filename, IClassFactory* factory)
     check(output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "Set video major");
     check(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32), "Set RGB32 subtype");
     check(decoded->SetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr, output.Get()), "Automatic RGB32 decoder selection");
+    ComPtr<IMFMediaType> negotiated;
+    check(decoded->GetCurrentMediaType(static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), &negotiated), "Negotiated RGB32 type");
+    const LONG stride = stride_of(negotiated.Get(), width);
     mjxl::Codec codec;
+    {
+        LONGLONG firstTime = 0;
+        auto packet = read(native.Get(), firstTime);
+        require(bool(packet), "Missing first packet");
+        stride_test(factory, input.Get(), packet.Get(), codec);
+        drain_test(factory, input.Get(), packet.Get());
+        PROPVARIANT start{};
+        start.vt = VT_I8;
+        start.hVal.QuadPart = 0;
+        check(native->SetCurrentPosition(GUID_NULL, start), "Rewind native reader");
+    }
     unsigned count = 0;
     LONGLONG previous = -1, last = 0;
     for (;;) {
@@ -142,7 +253,7 @@ static void run(const wchar_t* filename, IClassFactory* factory)
         require(bool(original) == bool(pixels), "Frame count mismatch");
         if (!original) { break; }
         require(decodedTime == nativeTime && decodedTime > previous, "Frame timestamps differ");
-        pixel_check(original.Get(), pixels.Get(), codec, width, height);
+        pixel_check(original.Get(), pixels.Get(), codec, width, height, stride);
         previous = last = decodedTime;
         ++count;
     }
@@ -156,8 +267,8 @@ static void run(const wchar_t* filename, IClassFactory* factory)
     auto original = read(native.Get(), nativeTime);
     auto pixels = read(decoded.Get(), decodedTime);
     require(original && pixels && nativeTime == decodedTime, "Seek timestamp mismatch");
-    pixel_check(original.Get(), pixels.Get(), codec, width, height);
-    std::cout << "PASS Media Foundation: " << count << " exact RGB frames; timestamps; seek; flush; malformed input rejection\n";
+    pixel_check(original.Get(), pixels.Get(), codec, width, height, stride);
+    std::cout << "PASS Media Foundation: " << count << " exact RGB frames; timestamps; seek; flush; malformed input rejection; output stride; drain resume\n";
 }
 int wmain(int argc, wchar_t** argv)
 {
