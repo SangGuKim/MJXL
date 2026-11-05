@@ -1,0 +1,6 @@
+#pragma once
+#include <guiddef.h>
+/** @brief COM class identifier of the synchronous MJXL Media Foundation decoder. */
+inline constexpr GUID kMjxlMft{0xd1793512, 0x85f0, 0x458c, {0x94, 0xc9, 0x33, 0x31, 0x91, 0x3b, 0x65, 0xa2}};
+/** @brief Compressed video subtype for independent JPEG XL frames in AVI. */
+inline constexpr GUID kMjxlMfSubtype{0x4c584a4d, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};

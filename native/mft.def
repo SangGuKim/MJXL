@@ -1,0 +1,7 @@
+LIBRARY mjxl_mft.dll
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllGetActivationFactory PRIVATE
+    DllCanUnloadNow PRIVATE
+    DllRegisterServer PRIVATE
+    DllUnregisterServer PRIVATE

@@ -36,13 +36,13 @@ MJXL AVI는 원래 JPEG 패킷과 PCM 샘플의 보존본이다. 원본 MOV의 �
 ## 팟플레이어와 DirectShow
 
 ```powershell
-& W:\proj\mjxl\native\register.ps1
+& W:\proj\mjxl\native\register.ps1 -AllUsers
 & W:\proj\mjxl\dist\Release\mjxl_graph_test.exe W:\proj\mjxl\dist\Release\mjxl_decoder.ax W:\proj\mjxl\results\example.avi
 ```
 
-`register.ps1`은 현재 사용자에게만 디코더를 등록한다. 관리자 권한은 필요하지 않다. 등록 해제는 `register.ps1 -Unregister`로 실행한다. 등록 후 플레이어를 다시 열고 AVI를 재생한다. 다른 코덱의 우선순위나 파일 연결은 변경하지 않는다.
+`register.ps1 -AllUsers`는 모든 사용자용으로 디코더를 등록하며 필요한 경우 Windows 관리자 승인창을 표시한다. 등록 해제는 `register.ps1 -AllUsers -Unregister`로 실행한다. `-AllUsers`를 생략하면 관리자 권한 없이 현재 사용자에게만 등록한다. 현재 PC에서는 필터 캐시를 새로 만든 뒤 현재 사용자용 등록만으로 팟플레이어 재생을 확인했다. 등록 후에도 자동 선택이 실패하면 오래된 사용자별 ActiveMovie 필터 캐시 여부를 확인한다. 등록 후 플레이어를 다시 열고 AVI를 재생한다. 다른 코덱의 우선순위나 파일 연결은 변경하지 않는다.
 
-DirectShow 디코더는 JXL을 RGB24로 직접 디코딩한다. JPEG 복원 뒤 다시 JPEG를 디코딩하는 경로를 사용하지 않는다. 모든 프레임이 독립 프레임이므로 임의 탐색을 위해 앞선 프레임을 복원할 필요가 없다. 기본 그래프 검사는 Windows AVI Splitter와 Null Renderer를 사용해 영상·PCM 입력과 중간 탐색을 확인한다. 마지막 인자에 `--registered`를 추가하면 COM 등록을 통한 필터 생성을 검사한다. `--auto`를 추가하면 DirectShow의 자동 필터 선택과 실제 렌더러로 재생·탐색을 검사하며 ActiveMovie 창과 음성 출력이 발생할 수 있다.
+DirectShow 디코더는 JXL을 RGB24로 직접 디코딩한다. JPEG 복원 뒤 다시 JPEG를 디코딩하는 경로를 사용하지 않는다. 모든 프레임이 독립 프레임이므로 임의 탐색을 위해 앞선 프레임을 복원할 필요가 없다. 기본 그래프 검사는 Windows AVI Splitter와 Null Renderer를 사용해 영상·PCM 입력과 중간 탐색을 확인한다. 마지막 인자에 `--registered`를 추가하면 DLL을 미리 로드하지 않고 COM 등록을 통한 필터 생성을 검사한다. `--auto`를 추가하면 DLL 사전 로드나 디코더 직접 생성 없이 DirectShow의 자동 필터 선택과 실제 렌더러로 재생·탐색을 검사하며 ActiveMovie 창과 음성 출력이 발생할 수 있다.
 
 VLC는 자체 디코더를 사용하므로 DirectShow 필터 등록만으로 MJXL 재생을 지원하지 않는다. 탐색기 미리보기 역시 사용 중인 미리보기 처리기의 디코딩 경로에 따라 달라진다.
 
@@ -67,3 +67,11 @@ VLC는 자체 디코더를 사용하므로 DirectShow 필터 등록만으로 MJX
 - 디코더 파일이 플레이어나 미리보기 프로세스에서 사용 중이면 해당 프로그램을 닫고 빌드한다. 잠긴 파일을 강제로 교체하지 않는다.
 
 자동 검증은 `native/validate_native.py`로 실행한다. 원본과 출력 샘플은 `samples/`, `results/native-v1/`에 있으며 Git 대상에서 제외한다.
+
+## Media Foundation 실험 구현
+
+`mjxl_mft.dll`과 `mjxl_mft_test.exe`는 Media Foundation용 실험 구현이다. 기존 7개 AVI의 1,332프레임을 로컬 MFT 경로로 검증했다. JPEG 바이트 복원과 별도로, RGB32 출력과 탐색·타임스탬프·오류 처리를 검사한다. `mjxl_mft_test.exe <MJXL AVI> --local <mjxl_mft.dll>`은 전역 등록 없이 실행한다.
+
+`register_mft.ps1`은 관리자 승인 후 MFT를 Program Files에 복사하고 데스크톱용으로 등록한다. `-Unregister`는 등록을 해제한다. 이 등록만으로 Windows Media Player에서 재생되지는 않았다. Media Player 지원은 미완료이며 현재 권장 재생 경로는 DirectShow이다.
+
+`package_mft.ps1`은 Windows SDK로 미디어 확장 MSIX를 생성한다. `-Sign`은 현재 사용자 My 저장소에 30일짜리 개발용 코드 서명 인증서를 만들거나 재사용한다. 신뢰 저장소 등록이나 패키지 설치는 수행하지 않는다. 개발 패키지는 Media Player에서 설치·재생 검증하지 않았으며 배포용 설치 프로그램으로 간주하지 않는다. 인증서·개인 키·서명 패키지는 Git에 포함하지 않는다.

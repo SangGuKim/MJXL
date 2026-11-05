@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+ xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+ xmlns:uap4="http://schemas.microsoft.com/appx/manifest/uap/windows10/4"
+ xmlns:wincap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/windowscapabilities"
+ xmlns:wincap3="http://schemas.microsoft.com/appx/manifest/foundation/windows10/windowscapabilities/3"
+ IgnorableNamespaces="uap uap4 wincap wincap3">
+ <Identity Name="MJXL.MediaExtension" Publisher="CN=MJXL Local Development" Version="0.1.0.0" ProcessorArchitecture="x64" />
+ <Properties>
+  <DisplayName>MJXL Media Extension</DisplayName>
+  <PublisherDisplayName>MJXL Local Development</PublisherDisplayName>
+  <Logo>Assets\StoreLogo.png</Logo>
+ </Properties>
+ <Dependencies><TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
+ <Resources><Resource Language="en-us" /></Resources>
+ <Applications>
+  <Application Id="MJXL">
+   <uap:VisualElements AppListEntry="none" DisplayName="MJXL Media Extension"
+    Description="Independent JPEG XL video decoder for MJXL AVI"
+    Square150x150Logo="Assets\Square150.png" Square44x44Logo="Assets\Square44.png" BackgroundColor="#192640" />
+   <Extensions>
+    <uap4:Extension Category="windows.mediaCodec">
+     <uap4:MediaCodec DisplayName="MJXL JPEG XL Decoder" Description="MJXL video decoder"
+      Category="videoDecoder" wincap3:ActivatableClassId="MJXL.MediaFoundationDecoder"
+      wincap3:Path="mjxl_mft.dll" wincap3:ProcessorArchitecture="x64">
+      <uap4:MediaEncodingProperties>
+       <uap4:InputTypes><uap4:InputType SubType="4C584A4D-0000-0010-8000-00AA00389B71" /></uap4:InputTypes>
+       <uap4:OutputTypes><uap4:OutputType SubType="00000016-0000-0010-8000-00AA00389B71" /></uap4:OutputTypes>
+      </uap4:MediaEncodingProperties>
+     </uap4:MediaCodec>
+    </uap4:Extension>
+   </Extensions>
+  </Application>
+ </Applications>
+ <Capabilities><wincap:Capability Name="inProcessMediaExtension" /></Capabilities>
+</Package>

@@ -1,4 +1,13 @@
-# MJXL 원본 보존 실험
+# MJXL
+
+MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축하여 저장 공간을 줄이는 Windows 실험 프로젝트이다. 네이티브 도구는 JPEG·PCM 바이트를 보존하는 MJXL AVI를 생성하고 DirectShow 필터로 재생한다. 네이티브 AVI에서 원래 MOV 컨테이너 전체를 복원하는 것은 지원하지 않는다.
+
+- 변환·재생·빌드: [네이티브 사용 방법](native/README.md)
+- 검증 범위와 작업 기록: [STATUS.md](STATUS.md)
+- Media Foundation 구현은 실험 단계이며 Windows Media Player 지원은 미완료이다.
+- 샘플 영상, 의존성, 빌드 산출물과 서명 인증서는 저장소에 포함하지 않는다.
+
+## Python 원본 보존 실험
 
 이 문서는 MJPEG의 JPEG 패킷을 가역적으로 압축하고 원본 MOV 파일 전체를 정확히 복원하는 Python 연구 도구를 설명한다. VS2026으로 빌드하는 실제 변환 실행 파일과 DirectShow 디코더는 [네이티브 사용 방법](native/README.md)을 참고한다. 프로젝트 루트의 `MJXL.sln`이 VS2026 솔루션이다.
 

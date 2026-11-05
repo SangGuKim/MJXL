@@ -52,27 +52,32 @@ int wmain(int argc, wchar_t** argv)
     int exitCode = 0;
     try {
         const auto path = std::filesystem::absolute(argv[1]);
-        module = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-        if (!module) { throw std::runtime_error("Cannot load decoder filter"); }
+        const bool automatic = argc == 4 && std::wstring(argv[3]) == L"--auto";
+        const bool registered = argc == 4 && std::wstring(argv[3]) == L"--registered";
+        if (argc == 4 && !automatic && !registered) {
+            throw std::runtime_error("Unknown graph test option");
+        }
         using Factory = HRESULT(WINAPI*)(REFCLSID, REFIID, void**);
         using Counter = unsigned long long(WINAPI*)();
-        auto create = reinterpret_cast<Factory>(GetProcAddress(module, "DllGetClassObject"));
-        auto counter = reinterpret_cast<Counter>(GetProcAddress(module, "MJXLDecodedFrames"));
-        if (!create || !counter) { throw std::runtime_error("Missing decoder exports"); }
-        ComPtr<IClassFactory> factory;
-        check(create(kMjxlDecoder, IID_PPV_ARGS(&factory)), "GetClassObject");
+        Counter counter = nullptr;
         ComPtr<IBaseFilter> decoder;
-        if (argc == 4) {
-            if (std::wstring(argv[3]) != L"--registered" && std::wstring(argv[3]) != L"--auto") {
-                throw std::runtime_error("Unknown graph test option");
+        if (registered) {
+            check(CoCreateInstance(kMjxlDecoder, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&decoder)), "Create registered decoder without preloading");
+        } else if (!automatic) {
+            module = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+            if (!module) {
+                throw std::runtime_error("Cannot load decoder filter");
             }
-            check(CoCreateInstance(kMjxlDecoder, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&decoder)), "Create registered decoder");
-        } else {
+            auto create = reinterpret_cast<Factory>(GetProcAddress(module, "DllGetClassObject"));
+            if (!create) {
+                throw std::runtime_error("Missing decoder factory export");
+            }
+            ComPtr<IClassFactory> factory;
+            check(create(kMjxlDecoder, IID_PPV_ARGS(&factory)), "GetClassObject");
             check(factory->CreateInstance(nullptr, IID_PPV_ARGS(&decoder)), "Create decoder");
         }
         ComPtr<IGraphBuilder> graph;
         check(CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&graph)), "Create graph");
-        const bool automatic = argc == 4 && std::wstring(argv[3]) == L"--auto";
         if (automatic) {
             check(graph->RenderFile(std::filesystem::absolute(argv[2]).c_str(), nullptr), "Automatic registered graph");
         } else {
@@ -97,6 +102,13 @@ int wmain(int argc, wchar_t** argv)
                 check(graph->AddFilter(audioSink.Get(), L"Audio Null Renderer"), "Add audio renderer");
                 check(graph->ConnectDirect(audioPin.Get(), pin(audioSink.Get(), PINDIR_INPUT).Get(), nullptr), "Connect PCM renderer");
             }
+        }
+        if (!module && !GetModuleHandleExW(0, path.c_str(), &module)) {
+            throw std::runtime_error("Registered graph did not load the expected MJXL module");
+        }
+        counter = reinterpret_cast<Counter>(GetProcAddress(module, "MJXLDecodedFrames"));
+        if (!counter) {
+            throw std::runtime_error("Missing decoder counter export");
         }
         ComPtr<IMediaFilter> clock;
         check(graph.As(&clock), "Clock interface");

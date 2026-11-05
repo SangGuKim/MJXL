@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <new>
+#include <string_view>
 
 static std::atomic<unsigned long long> decodedFrames{0};
 
@@ -145,10 +146,13 @@ static const AMOVIESETUP_FILTER setup{&kMjxlDecoder, L"MJXL JPEG XL Decoder", ME
 CFactoryTemplate g_Templates[] = {{L"MJXL JPEG XL Decoder", &kMjxlDecoder, Decoder::CreateInstance, nullptr, &setup}};
 int g_cTemplates = 1;
 
-static HRESULT register_user(bool install)
+static HRESULT register_filter(bool install, bool allUsers = false)
 {
     HKEY classes = nullptr;
-    auto status = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes", 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &classes, nullptr);
+    // 시스템 Classes 루트는 쓰기 권한 없이 열고 실제 등록 하위 키에서 권한을 검사한다.
+    auto status = allUsers
+        ? RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Classes", 0, KEY_READ, &classes)
+        : RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes", 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &classes, nullptr);
     if (status != ERROR_SUCCESS) { return HRESULT_FROM_WIN32(status); }
     status = RegOverridePredefKey(HKEY_CLASSES_ROOT, classes);
     if (status != ERROR_SUCCESS) { RegCloseKey(classes); return HRESULT_FROM_WIN32(status); }
@@ -160,11 +164,19 @@ static HRESULT register_user(bool install)
 
 STDAPI DllRegisterServer()
 {
-    return register_user(true);
+    return register_filter(true);
 }
 STDAPI DllUnregisterServer()
 {
-    return register_user(false);
+    return register_filter(false);
+}
+STDAPI DllInstall(BOOL install, LPCWSTR command)
+{
+    const std::wstring_view scope = command ? command : L"";
+    if (scope != L"machine" && scope != L"user") {
+        return E_INVALIDARG;
+    }
+    return register_filter(install != FALSE, scope == L"machine");
 }
 extern "C" unsigned long long __stdcall MJXLDecodedFrames()
 {
