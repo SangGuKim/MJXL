@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-MJXL is an experimental Windows project that reduces the size of existing MJPEG videos by reversibly recompressing their JPEG frames with JPEG XL. The native tools produce MJXL AVI files that preserve the original JPEG and PCM bytes, with playback through a DirectShow filter. Restoring the complete original MOV container from a native MJXL AVI is not supported.
+MJXL is an experimental Windows project that reduces the size of existing MJPEG videos by reversibly recompressing their JPEG frames with JPEG XL. The native tools produce MJXL AVI files that can restore the original JPEG and PCM bytes, with playback through a DirectShow filter. Restoring the complete original MOV container from a native MJXL AVI is not supported.
 
 - Build, conversion, and playback: [Native tools guide (Korean)](native/README.md)
 - Validation scope and work log: [STATUS.md (Korean)](STATUS.md)
@@ -11,7 +11,7 @@ MJXL is an experimental Windows project that reduces the size of existing MJPEG 
 
 ## Native tools at a glance
 
-The native implementation targets VS2026 x64 and uses the experimental AVI FourCC `MJXL`. Each video packet is an independent JXL file containing JPEG reconstruction metadata. PCM audio is copied without modification.
+The native implementation targets VS2026 x64 and uses the experimental AVI FourCC `MJXL`. Each video packet is an independent JXL file containing JPEG reconstruction metadata. 8, 16, and 24-bit PCM audio is stored losslessly as FLAC by default. Use `--pcm` to keep PCM; 32-bit PCM always stays PCM.
 
 Set `FFMPEG_SDK` to your FFmpeg SDK directory, then run the following commands from the repository root. See the native guide for the required Visual Studio tools, Windows SDK, CMake, and Python environment.
 
@@ -29,7 +29,7 @@ Set `FFMPEG_SDK` to your FFmpeg SDK directory, then run the following commands f
 
 Provide your own input video. Output files are not overwritten. `restore` rebuilds an MJPEG AVI using the preserved JPEG packets; it does not recreate the original MOV file. PotPlayer playback has been verified on the development PC. VLC does not use this DirectShow decoder.
 
-The current native writer supports constant-frame-rate video, up to one PCM audio stream, and classic AVI files smaller than 2 GiB. OpenDML and large-file streaming are not implemented.
+The current native writer supports constant-frame-rate video, up to one audio stream, and classic AVI files smaller than 2 GiB. OpenDML and large-file streaming are not implemented. Windows Media Foundation stalls when reading FLAC inside AVI, so use `--pcm` for that playback path.
 
 ## Python preservation experiments
 

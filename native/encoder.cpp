@@ -1,11 +1,14 @@
 #include "core.hpp"
+#include "flac_audio.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 extern "C" {
@@ -19,14 +22,19 @@ constexpr uint32_t fourcc(char a, char b, char c, char d)
     return uint8_t(a) | uint32_t(uint8_t(b)) << 8 | uint32_t(uint8_t(c)) << 16 | uint32_t(uint8_t(d)) << 24;
 }
 constexpr auto MJXL = fourcc('M', 'J', 'X', 'L');
+constexpr uint16_t kFlacFormatTag = 0xF1AC;
+constexpr uint32_t kAudioMetadataVersion = 1;
 struct Packet {
     bool video;
     std::vector<uint8_t> bytes;
 };
 struct Movie {
+    // FLAC AVI에서도 bits는 저장 비트가 아니라 복원할 원래 PCM 비트이다.
     unsigned width = 0, height = 0, sampleRate = 0, channels = 0, bits = 0;
     AVRational fps{};
     bool jxl = false;
+    bool flac = false;
+    std::vector<uint8_t> streamInfo;
     std::vector<Packet> packets;
 };
 
@@ -41,6 +49,45 @@ static std::string utf8(const fs::path& path)
 {
     auto text = path.u8string();
     return {reinterpret_cast<const char*>(text.data()), text.size()};
+}
+
+// hdrl 안의 mjxa 청크에서 FLAC로 저장하기 전의 PCM 비트 수를 읽는다.
+static unsigned read_original_bits(const fs::path& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    char header[12]{};
+    file.read(header, sizeof(header));
+    check(file && std::memcmp(header, "RIFF", 4) == 0 && std::memcmp(header + 8, "AVI ", 4) == 0, "FLAC audio is only supported in AVI");
+    const auto next = [&](char* tag, uint32_t& size) {
+        file.read(tag, 4);
+        file.read(reinterpret_cast<char*>(&size), sizeof(size));
+        return bool(file);
+    };
+    char tag[4]{};
+    uint32_t size = 0;
+    while (next(tag, size)) {
+        char type[4]{};
+        if (std::memcmp(tag, "LIST", 4) == 0) {
+            check(size >= 4 && bool(file.read(type, 4)), "Invalid AVI list");
+            if (std::memcmp(type, "hdrl", 4) == 0) {
+                const auto end = static_cast<std::streamoff>(file.tellg()) + size - 4;
+                while (static_cast<std::streamoff>(file.tellg()) < end && next(tag, size)) {
+                    if (std::memcmp(tag, "mjxa", 4) == 0) {
+                        uint32_t values[2]{};
+                        check(size == sizeof(values) && bool(file.read(reinterpret_cast<char*>(values), sizeof(values))), "Invalid MJXL audio metadata");
+                        check(values[0] == kAudioMetadataVersion, "Unknown MJXL audio metadata version");
+                        return values[1];
+                    }
+                    file.seekg(std::streamoff(size) + (size & 1), std::ios::cur);
+                }
+                break;
+            }
+            file.seekg(std::streamoff(size) - 4 + (size & 1), std::ios::cur);
+        } else {
+            file.seekg(std::streamoff(size) + (size & 1), std::ios::cur);
+        }
+    }
+    throw std::runtime_error("FLAC audio without MJXL metadata is unsupported");
 }
 
 static Movie read_movie(const fs::path& path)
@@ -66,12 +113,20 @@ static Movie read_movie(const fs::path& path)
             check(movie.fps.num > 0 && movie.fps.den > 0, "Cannot determine constant frame rate");
         } else if (info->codec_type == AVMEDIA_TYPE_AUDIO) {
             check(audio < 0, "Multiple audio streams are not supported");
-            check(info->codec_id == AV_CODEC_ID_PCM_U8 || info->codec_id == AV_CODEC_ID_PCM_S16LE || info->codec_id == AV_CODEC_ID_PCM_S24LE || info->codec_id == AV_CODEC_ID_PCM_S32LE, "Audio must be unsigned PCM8 or signed little-endian PCM16/24/32");
             audio = static_cast<int>(i);
             movie.sampleRate = info->sample_rate;
             movie.channels = info->ch_layout.nb_channels;
-            movie.bits = av_get_bits_per_sample(info->codec_id);
-            check(movie.sampleRate > 0 && movie.channels > 0 && movie.channels <= 8, "Invalid PCM format");
+            if (info->codec_id == AV_CODEC_ID_FLAC) {
+                movie.flac = true;
+                movie.bits = read_original_bits(path);
+                check(info->extradata && info->extradata_size == 34, "FLAC audio has no STREAMINFO");
+                movie.streamInfo.assign(info->extradata, info->extradata + info->extradata_size);
+                check(mjxl::flac_supported({movie.bits, movie.channels, movie.sampleRate}), "Invalid MJXL audio metadata");
+            } else {
+                check(info->codec_id == AV_CODEC_ID_PCM_U8 || info->codec_id == AV_CODEC_ID_PCM_S16LE || info->codec_id == AV_CODEC_ID_PCM_S24LE || info->codec_id == AV_CODEC_ID_PCM_S32LE, "Audio must be FLAC, unsigned PCM8 or signed little-endian PCM16/24/32");
+                movie.bits = av_get_bits_per_sample(info->codec_id);
+            }
+            check(movie.sampleRate > 0 && movie.channels > 0 && movie.channels <= 8, "Invalid audio format");
         } else {
             throw std::runtime_error("Additional streams would be lost; input is unsupported");
         }
@@ -112,10 +167,39 @@ class AviWriter {
     std::fstream file_;
     uint64_t movi_ = 0, frameCountPos_ = 0, videoLengthPos_ = 0, audioLengthPos_ = 0;
     uint32_t frames_ = 0, samples_ = 0, blockAlign_ = 0;
+    bool flac_ = false;
     struct Entry { uint32_t id, flags, offset, size; };
     std::vector<Entry> index_;
+
+    // FLAC 프레임을 가변 크기 오디오 청크로 선언하고 원래 PCM 비트를 별도 청크에 남긴다.
+    void write_flac_header(const Movie& movie, const mjxl::FlacStream& flac)
+    {
+        uint64_t total = 0;
+        uint32_t largest = 0;
+        for (const auto& packet : flac.packets) {
+            total += packet.bytes.size();
+            largest = (std::max)(largest, static_cast<uint32_t>(packet.bytes.size()));
+        }
+        const uint64_t last = flac.packets.back().position;
+        const uint64_t samples = std::max<uint64_t>(last + flac.frameSamples, 1);
+        const auto stream = list("strl");
+        tag("strh"); u32(56); tag("auds"); u32(0); u32(0); u16(0); u16(0); u32(0);
+        u32(flac.frameSamples); u32(movie.sampleRate); u32(0);
+        audioLengthPos_ = position(); u32(0);
+        u32(largest); u32(0xffffffff); u32(0);
+        for (int i = 0; i < 4; ++i) { u16(0); }
+        tag("strf"); u32(static_cast<uint32_t>(18 + flac.streamInfo.size()));
+        u16(kFlacFormatTag); u16(static_cast<uint16_t>(movie.channels));
+        u32(movie.sampleRate); u32(static_cast<uint32_t>(total * movie.sampleRate / samples));
+        // AVI Splitter가 청크당 재생 시간을 계산할 수 있게 VBR 관례대로 프레임당 샘플 수를 적는다.
+        u16(static_cast<uint16_t>(flac.frameSamples)); u16(static_cast<uint16_t>(flac.storedBits));
+        u16(static_cast<uint16_t>(flac.streamInfo.size()));
+        bytes(flac.streamInfo.data(), flac.streamInfo.size());
+        finish_list(stream);
+        tag("mjxa"); u32(8); u32(kAudioMetadataVersion); u32(movie.bits);
+    }
 public:
-    explicit AviWriter(const fs::path& path, const Movie& movie, uint32_t videoCodec = MJXL)
+    explicit AviWriter(const fs::path& path, const Movie& movie, uint32_t videoCodec = MJXL, const mjxl::FlacStream* flac = nullptr)
     {
         check(!fs::exists(path), "Output or partial output already exists");
         file_.open(path, std::ios::binary | std::ios::out | std::ios::in | std::ios::trunc);
@@ -138,7 +222,10 @@ public:
         tag("strf"); u32(40); u32(40); u32(movie.width); u32(movie.height); u16(1); u16(24);
         u32(videoCodec); u32(movie.width * movie.height * 3); u32(0); u32(0); u32(0); u32(0);
         finish_list(stream);
-        if (movie.channels) {
+        if (flac) {
+            flac_ = true;
+            write_flac_header(movie, *flac);
+        } else if (movie.channels) {
             blockAlign_ = movie.channels * movie.bits / 8;
             stream = list("strl");
             tag("strh"); u32(56); tag("auds"); u32(0); u32(0); u16(0); u16(0); u32(0);
@@ -198,6 +285,9 @@ public:
         index_.push_back({id, 0x10, static_cast<uint32_t>(offset), static_cast<uint32_t>(data.size())});
         if (video) {
             ++frames_;
+        } else if (flac_) {
+            // 가변 크기 오디오 스트림의 길이는 청크 수이다.
+            ++samples_;
         } else {
             check(blockAlign_ && data.size() % blockAlign_ == 0, "PCM packet is not sample aligned");
             samples_ += static_cast<uint32_t>(data.size() / blockAlign_);
@@ -215,21 +305,41 @@ public:
     }
 };
 
+// 저장 형식과 상관없이 음성 전체를 원래 PCM 바이트로 돌려준다.
+static std::vector<uint8_t> pcm_of(const Movie& movie)
+{
+    std::vector<uint8_t> pcm;
+    std::unique_ptr<mjxl::FlacDecoder> decoder;
+    if (movie.flac) {
+        decoder = std::make_unique<mjxl::FlacDecoder>(movie.streamInfo, mjxl::PcmFormat{movie.bits, movie.channels, movie.sampleRate});
+    }
+    for (const auto& p : movie.packets) {
+        if (!p.video) {
+            const auto bytes = decoder ? decoder->decode(p.bytes) : p.bytes;
+            pcm.insert(pcm.end(), bytes.begin(), bytes.end());
+        }
+    }
+    if (decoder) {
+        const auto bytes = decoder->flush();
+        pcm.insert(pcm.end(), bytes.begin(), bytes.end());
+    }
+    return pcm;
+}
+
 static void verify(const Movie& source, const fs::path& encoded, const mjxl::Codec& codec, bool expectedJxl = true)
 {
     const auto target = read_movie(encoded);
     check(target.jxl == expectedJxl && target.width == source.width && target.height == source.height && av_cmp_q(target.fps, source.fps) == 0, "Video format verification failed");
     check(target.bits == source.bits && target.channels == source.channels && target.sampleRate == source.sampleRate, "Audio format verification failed");
     std::vector<std::vector<uint8_t>> originalFrames, restoredFrames;
-    std::vector<uint8_t> originalAudio, restoredAudio;
     for (const auto& p : source.packets) {
         if (p.video) { originalFrames.push_back(source.jxl ? codec.jpeg(p.bytes) : p.bytes); }
-        else { originalAudio.insert(originalAudio.end(), p.bytes.begin(), p.bytes.end()); }
     }
     for (const auto& p : target.packets) {
         if (p.video) { restoredFrames.push_back(target.jxl ? codec.jpeg(p.bytes) : p.bytes); }
-        else { restoredAudio.insert(restoredAudio.end(), p.bytes.begin(), p.bytes.end()); }
     }
+    const auto originalAudio = pcm_of(source);
+    const auto restoredAudio = pcm_of(target);
     check(originalFrames == restoredFrames, "Original JPEG packet verification failed");
     check(originalAudio == restoredAudio, "PCM sample verification failed");
     std::cout << "Verified " << originalFrames.size() << " exact JPEG frames and " << originalAudio.size() << " exact PCM bytes\n";
@@ -239,28 +349,59 @@ int wmain(int argc, wchar_t** argv)
 {
     SetConsoleOutputCP(CP_UTF8); SetConsoleCP(CP_UTF8); av_log_set_level(AV_LOG_ERROR);
     try {
-        check(argc >= 3, "Usage: mjxl encode input.mov output.avi | restore encoded.avi mjpeg.avi | verify original.mov encoded.avi | bench encoded.avi");
+        check(argc >= 3, "Usage: mjxl encode input.mov output.avi [--pcm] | restore encoded.avi mjpeg.avi | verify original.mov encoded.avi | bench encoded.avi");
         const std::wstring command = argv[1];
         const auto movie = read_movie(argv[2]);
         mjxl::Codec codec;
         if (command == L"encode") {
-            check(argc == 4 && !movie.jxl, "encode requires an MJPEG input and an AVI output");
+            const bool keepPcm = argc == 5 && std::wstring(argv[4]) == L"--pcm";
+            check((argc == 4 || keepPcm) && !movie.jxl, "encode requires an MJPEG input and an AVI output");
             const fs::path output(argv[3]);
             check(!fs::exists(output), "Output already exists");
             auto partial = output; partial += L".partial";
-            AviWriter writer(partial, movie);
+            const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate};
+            const auto pcm = pcm_of(movie);
+            std::optional<mjxl::FlacStream> flac;
+            if (!keepPcm && !pcm.empty() && mjxl::flac_supported(format)) {
+                flac = mjxl::flac_encode(pcm, format);
+                // 파일을 쓰기 전에 FLAC가 원래 PCM으로 되돌아오는지 확인한다.
+                mjxl::FlacDecoder decoder(flac->streamInfo, format);
+                std::vector<uint8_t> restored;
+                for (const auto& packet : flac->packets) {
+                    const auto bytes = decoder.decode(packet.bytes);
+                    restored.insert(restored.end(), bytes.begin(), bytes.end());
+                }
+                const auto rest = decoder.flush();
+                restored.insert(restored.end(), rest.begin(), rest.end());
+                check(restored == pcm, "FLAC round-trip verification failed");
+                std::cout << "Audio FLAC: " << pcm.size() << " PCM bytes stored as " << flac->storedBits << "-bit FLAC\n";
+            } else if (!pcm.empty()) {
+                std::cout << "Audio stays PCM: " << pcm.size() << " bytes\n";
+            }
+            AviWriter writer(partial, movie, MJXL, flac ? &*flac : nullptr);
             unsigned frames = 0;
+            size_t nextAudio = 0;
+            // FLAC 프레임은 재생 시각이 해당 영상 프레임에 도달하기 전에 기록한다.
+            const auto write_audio_until = [&](int64_t frame) {
+                while (flac && nextAudio < flac->packets.size() &&
+                       flac->packets[nextAudio].position * movie.fps.num <= frame * movie.fps.den * movie.sampleRate) {
+                    writer.packet(false, flac->packets[nextAudio].bytes);
+                    ++nextAudio;
+                }
+            };
             for (const auto& p : movie.packets) {
                 if (p.video) {
+                    write_audio_until(frames);
                     const auto encoded = codec.encode(p.bytes);
                     check(codec.jpeg(encoded) == p.bytes, "JPEG round-trip verification failed");
                     writer.packet(true, encoded);
                     ++frames;
                     if (frames % 60 == 0) { std::cout << "Encoded " << frames << " frames\n"; }
-                } else {
+                } else if (!flac) {
                     writer.packet(false, p.bytes);
                 }
             }
+            write_audio_until(INT64_MAX / (int64_t(movie.fps.den) * movie.sampleRate));
             writer.finish();
             verify(movie, partial, codec);
             fs::rename(partial, output);
@@ -271,13 +412,24 @@ int wmain(int argc, wchar_t** argv)
             check(!fs::exists(output), "Output already exists");
             auto partial = output; partial += L".partial";
             AviWriter writer(partial, movie, fourcc('M', 'J', 'P', 'G'));
+            std::unique_ptr<mjxl::FlacDecoder> decoder;
+            if (movie.flac) {
+                decoder = std::make_unique<mjxl::FlacDecoder>(movie.streamInfo, mjxl::PcmFormat{movie.bits, movie.channels, movie.sampleRate});
+            }
             for (const auto& p : movie.packets) {
                 if (p.video) {
                     const auto jpeg = codec.jpeg(p.bytes);
                     writer.packet(true, jpeg);
+                } else if (decoder) {
+                    const auto pcm = decoder->decode(p.bytes);
+                    if (!pcm.empty()) { writer.packet(false, pcm); }
                 } else {
                     writer.packet(false, p.bytes);
                 }
+            }
+            if (decoder) {
+                const auto pcm = decoder->flush();
+                if (!pcm.empty()) { writer.packet(false, pcm); }
             }
             writer.finish();
             verify(movie, partial, codec, false);

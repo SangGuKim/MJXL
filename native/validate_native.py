@@ -6,7 +6,7 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 binary = root / 'dist' / 'Release'
-output = root / 'results' / 'native-v1'
+output = root / 'results' / 'native-flac'
 output.mkdir(parents=True, exist_ok=True)
 results = []
 for source in sorted((root / 'samples').glob('*.MOV')):
