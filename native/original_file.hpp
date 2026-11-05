@@ -17,7 +17,7 @@ struct OriginalPacket {
  * @param packets Media packets in reading order. They must not overlap.
  * @return Payload holding the packet layout, the remaining bytes and a SHA-256 hash.
  *
- * Packet bytes are not stored because the AVI already holds them.
+ * Packet bytes are not stored because the encoded container already holds them.
  */
 std::vector<uint8_t> pack_original(std::span<const uint8_t> file, const std::vector<OriginalPacket>& packets);
 

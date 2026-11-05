@@ -7,6 +7,8 @@
 #endif
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -24,6 +26,8 @@
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/log.h>
+#include <libavutil/mem.h>
+#include <libavutil/error.h>
 }
 
 namespace fs = std::filesystem;
@@ -34,13 +38,23 @@ constexpr uint32_t fourcc(char a, char b, char c, char d)
 constexpr auto MJXL = fourcc('M', 'J', 'X', 'L');
 constexpr uint16_t kFlacFormatTag = 0xF1AC;
 constexpr uint32_t kAudioMetadataVersion = 1;
+constexpr auto kOriginalAttachment = "mjxl-original.bin";
+constexpr auto kOriginalMime = "application/x-mjxl-original";
+
+static bool original_attachment(const AVStream* stream)
+{
+    const auto name = av_dict_get(stream->metadata, "filename", nullptr, 0);
+    const auto mime = av_dict_get(stream->metadata, "mimetype", nullptr, 0);
+    return stream->codecpar->codec_type == AVMEDIA_TYPE_ATTACHMENT && name && mime &&
+           std::strcmp(name->value, kOriginalAttachment) == 0 && std::strcmp(mime->value, kOriginalMime) == 0;
+}
 struct Packet {
     bool video;
     std::vector<uint8_t> bytes;
     int64_t position;
 };
 struct Movie {
-    // For FLAC AVI, bits describes the original PCM depth to restore, not the stored depth.
+    // For FLAC storage, bits describes the original PCM depth to restore, not the stored depth.
     unsigned width = 0, height = 0, sampleRate = 0, channels = 0, bits = 0;
     AVRational fps{};
     bool jxl = false;
@@ -115,7 +129,7 @@ static Movie read_movie(const fs::path& path)
         const auto info = stream->codecpar;
         if (info->codec_type == AVMEDIA_TYPE_VIDEO) {
             check(video < 0, "Multiple video streams are not supported");
-            check(info->codec_id == AV_CODEC_ID_MJPEG || info->codec_tag == MJXL, "Input must be MJPEG or experimental MJXL AVI");
+            check(info->codec_id == AV_CODEC_ID_MJPEG || info->codec_tag == MJXL, "Input must be MJPEG or experimental MJXL");
             video = static_cast<int>(i);
             movie.jxl = info->codec_tag == MJXL;
             movie.width = info->width;
@@ -129,7 +143,14 @@ static Movie read_movie(const fs::path& path)
             movie.channels = info->ch_layout.nb_channels;
             if (info->codec_id == AV_CODEC_ID_FLAC) {
                 movie.flac = true;
-                movie.bits = read_original_bits(path);
+                const auto bits = av_dict_get(stream->metadata, "MJXL_ORIGINAL_BITS", nullptr, 0);
+                if (bits) {
+                    const std::string value(bits->value);
+                    check(value == "8" || value == "16" || value == "24", "Invalid MJXL audio metadata");
+                    movie.bits = static_cast<unsigned>(std::stoi(value));
+                } else {
+                    movie.bits = read_original_bits(path);
+                }
                 check(info->extradata && info->extradata_size == 34, "FLAC audio has no STREAMINFO");
                 movie.streamInfo.assign(info->extradata, info->extradata + info->extradata_size);
                 check(mjxl::flac_supported({movie.bits, movie.channels, movie.sampleRate}), "Invalid MJXL audio metadata");
@@ -138,6 +159,8 @@ static Movie read_movie(const fs::path& path)
                 movie.bits = av_get_bits_per_sample(info->codec_id);
             }
             check(movie.sampleRate > 0 && movie.channels > 0 && movie.channels <= 8, "Invalid audio format");
+        } else if (original_attachment(stream)) {
+            continue;
         } else {
             throw std::runtime_error("Additional streams would be lost; input is unsupported");
         }
@@ -155,7 +178,7 @@ static Movie read_movie(const fs::path& path)
                 if (isVideo) {
                     if (p->pts != AV_NOPTS_VALUE) {
                         const auto expected = av_rescale_q(static_cast<int64_t>(frame), av_inv_q(movie.fps), raw->streams[video]->time_base);
-                        check(std::abs(p->pts - expected) <= 1, "Variable frame rate is not supported by this AVI profile");
+                        check(std::abs(p->pts - expected) <= 1, "Variable frame rate is not supported");
                     }
                     ++frame;
                 }
@@ -382,7 +405,25 @@ static std::vector<uint8_t> read_original_chunk(const fs::path& path)
     std::ifstream file(path, std::ios::binary);
     char header[12]{};
     file.read(header, sizeof(header));
-    check(file && std::memcmp(header, "RIFF", 4) == 0, "Original data is only supported in AVI");
+    check(bool(file), "Cannot read container header");
+    if (std::memcmp(header, "RIFF", 4) != 0) {
+        AVFormatContext* raw = nullptr;
+        check(avformat_open_input(&raw, utf8(path).c_str(), nullptr, nullptr) >= 0, "Cannot open recovery container");
+        auto closer = [](AVFormatContext* ptr) { avformat_close_input(&ptr); };
+        std::unique_ptr<AVFormatContext, decltype(closer)> input(raw, closer);
+        std::vector<uint8_t> result;
+        bool found = false;
+        for (unsigned i = 0; i < raw->nb_streams; ++i) {
+            if (original_attachment(raw->streams[i])) {
+                check(!found, "Duplicate original-file attachments");
+                found = true;
+                const auto info = raw->streams[i]->codecpar;
+                check(info->extradata && info->extradata_size > 0, "Empty original-file attachment");
+                result.assign(info->extradata, info->extradata + info->extradata_size);
+            }
+        }
+        return result;
+    }
     uint64_t position = sizeof(header);
     while (position + 8 <= total) {
         char tag[4]{};
@@ -424,8 +465,8 @@ static std::vector<uint8_t> make_original_data(const Movie& movie, std::span<con
     }
 }
 
-// Reconstruct the complete original file using only the encoded AVI.
-static std::vector<uint8_t> rebuild_from_avi(const Movie& encoded, std::span<const uint8_t> payload, const mjxl::Codec& codec)
+// Reconstruct the complete original file using only the encoded media container.
+static std::vector<uint8_t> rebuild_from_container(const Movie& encoded, std::span<const uint8_t> payload, const mjxl::Codec& codec)
 {
     std::vector<std::vector<uint8_t>> frames;
     for (const auto& p : encoded.packets) {
@@ -438,6 +479,157 @@ static std::vector<uint8_t> rebuild_from_avi(const Movie& encoded, std::span<con
 static fs::path to_path(const std::string& text)
 {
     return fs::path(std::u8string(reinterpret_cast<const char8_t*>(text.data()), text.size()));
+}
+
+static void check_av(int result, const char* operation)
+{
+    if (result < 0) {
+        char message[AV_ERROR_MAX_STRING_SIZE]{};
+        av_strerror(result, message, sizeof(message));
+        throw std::runtime_error(std::string(operation) + ": " + message);
+    }
+}
+
+class MatroskaWriter {
+    static void close(AVFormatContext* context)
+    {
+        if (context) {
+            if (context->pb) {
+                avio_closep(&context->pb);
+            }
+            avformat_free_context(context);
+        }
+    }
+    std::unique_ptr<AVFormatContext, decltype(&close)> context_{nullptr, close};
+    AVStream* video_ = nullptr;
+    AVStream* audio_ = nullptr;
+    AVRational videoTimeBase_{};
+    unsigned sampleRate_ = 0, blockAlign_ = 0, frameSamples_ = 0;
+    int64_t frames_ = 0, samples_ = 0, totalSamples_ = 0;
+
+    static void extradata(AVCodecParameters* parameters, std::span<const uint8_t> data)
+    {
+        check(data.size() < INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE, "Container metadata is too large");
+        parameters->extradata = static_cast<uint8_t*>(av_mallocz(data.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        check(parameters->extradata != nullptr, "Cannot allocate container metadata");
+        std::memcpy(parameters->extradata, data.data(), data.size());
+        parameters->extradata_size = static_cast<int>(data.size());
+    }
+public:
+    MatroskaWriter(const fs::path& path, const Movie& movie, const mjxl::FlacStream* flac,
+                   std::span<const uint8_t> original)
+    {
+        check(!fs::exists(path), "Output or partial output already exists");
+        AVFormatContext* raw = nullptr;
+        check_av(avformat_alloc_output_context2(&raw, nullptr, "matroska", utf8(path).c_str()), "Create Matroska muxer");
+        context_.reset(raw);
+        video_ = avformat_new_stream(raw, nullptr);
+        check(video_ != nullptr, "Cannot allocate video stream");
+        videoTimeBase_ = av_inv_q(movie.fps);
+        video_->time_base = videoTimeBase_;
+        video_->avg_frame_rate = movie.fps;
+        video_->r_frame_rate = movie.fps;
+        auto video = video_->codecpar;
+        video->codec_type = AVMEDIA_TYPE_VIDEO;
+        video->codec_id = AV_CODEC_ID_NONE;
+        video->codec_tag = MJXL;
+        video->width = movie.width;
+        video->height = movie.height;
+        video->bits_per_coded_sample = 24;
+        if (movie.channels) {
+            audio_ = avformat_new_stream(raw, nullptr);
+            check(audio_ != nullptr, "Cannot allocate audio stream");
+            sampleRate_ = movie.sampleRate;
+            blockAlign_ = movie.channels * movie.bits / 8;
+            uint64_t audioBytes = 0;
+            for (const auto& packet : movie.packets) {
+                if (!packet.video) {
+                    audioBytes += packet.bytes.size();
+                }
+            }
+            check(audioBytes % blockAlign_ == 0, "PCM input is not sample aligned");
+            totalSamples_ = static_cast<int64_t>(audioBytes / blockAlign_);
+            audio_->time_base = {1, static_cast<int>(sampleRate_)};
+            auto audio = audio_->codecpar;
+            audio->codec_type = AVMEDIA_TYPE_AUDIO;
+            audio->sample_rate = sampleRate_;
+            av_channel_layout_default(&audio->ch_layout, movie.channels);
+            audio->bits_per_coded_sample = flac ? flac->storedBits : movie.bits;
+            audio->bits_per_raw_sample = audio->bits_per_coded_sample;
+            if (flac) {
+                audio->codec_id = AV_CODEC_ID_FLAC;
+                frameSamples_ = flac->frameSamples;
+                extradata(audio, flac->streamInfo);
+                check_av(av_dict_set(&audio_->metadata, "MJXL_ORIGINAL_BITS", std::to_string(movie.bits).c_str(), 0), "Set original PCM depth");
+            } else {
+                switch (movie.bits) {
+                case 8: audio->codec_id = AV_CODEC_ID_PCM_U8; break;
+                case 16: audio->codec_id = AV_CODEC_ID_PCM_S16LE; break;
+                case 24: audio->codec_id = AV_CODEC_ID_PCM_S24LE; break;
+                case 32: audio->codec_id = AV_CODEC_ID_PCM_S32LE; break;
+                default: throw std::runtime_error("Unsupported PCM depth");
+                }
+                audio->block_align = blockAlign_;
+                audio->bit_rate = int64_t(sampleRate_) * blockAlign_ * 8;
+            }
+        }
+        if (!original.empty()) {
+            const auto attachment = avformat_new_stream(raw, nullptr);
+            check(attachment != nullptr, "Cannot allocate original-file attachment");
+            attachment->codecpar->codec_type = AVMEDIA_TYPE_ATTACHMENT;
+            extradata(attachment->codecpar, original);
+            check_av(av_dict_set(&attachment->metadata, "filename", kOriginalAttachment, 0), "Set attachment filename");
+            check_av(av_dict_set(&attachment->metadata, "mimetype", kOriginalMime, 0), "Set attachment type");
+        }
+        check_av(avio_open(&raw->pb, utf8(path).c_str(), AVIO_FLAG_WRITE), "Open Matroska output");
+        check_av(avformat_write_header(raw, nullptr), "Write Matroska header");
+    }
+
+    void packet(bool video, std::span<const uint8_t> data)
+    {
+        const auto stream = video ? video_ : audio_;
+        check(stream != nullptr && data.size() < INT_MAX, "Invalid Matroska packet");
+        AVPacket* raw = av_packet_alloc();
+        check(raw != nullptr, "Cannot allocate Matroska packet");
+        auto closer = [](AVPacket* value) { av_packet_free(&value); };
+        std::unique_ptr<AVPacket, decltype(closer)> packet(raw, closer);
+        check_av(av_new_packet(raw, static_cast<int>(data.size())), "Allocate packet bytes");
+        std::memcpy(raw->data, data.data(), data.size());
+        raw->stream_index = stream->index;
+        raw->flags = AV_PKT_FLAG_KEY;
+        const auto timeBase = video ? videoTimeBase_ : AVRational{1, static_cast<int>(sampleRate_)};
+        auto& position = video ? frames_ : samples_;
+        if (!video && !frameSamples_) {
+            check(data.size() % blockAlign_ == 0, "PCM packet is not sample aligned");
+        }
+        const int64_t duration = video ? 1 : frameSamples_ ?
+            (std::min<int64_t>)(frameSamples_, totalSamples_ - samples_) : static_cast<int64_t>(data.size() / blockAlign_);
+        check(duration > 0, "Invalid Matroska packet duration");
+        raw->pts = raw->dts = av_rescale_q(position, timeBase, stream->time_base);
+        raw->duration = av_rescale_q(position + duration, timeBase, stream->time_base) - raw->pts;
+        position += duration;
+        check_av(av_interleaved_write_frame(context_.get(), raw), "Write Matroska packet");
+    }
+
+    void finish()
+    {
+        check_av(av_write_trailer(context_.get()), "Finish Matroska output");
+        check_av(avio_closep(&context_->pb), "Close Matroska output");
+    }
+};
+
+static void print_size_row(const std::string& label, uint64_t original, uint64_t stored)
+{
+    const auto bytes = [](uint64_t value) {
+        auto text = std::to_string(value);
+        for (size_t i = text.size(); i > 3; i -= 3) {
+            text.insert(i - 3, ",");
+        }
+        return text;
+    };
+    const auto reduction = original == 0 ? "n/a" :
+        std::format("{:.2f}%", 100.0 * (1.0 - static_cast<double>(stored) / static_cast<double>(original)));
+    std::cout << std::format("{:<20} {:>18} -> {:>18} {:>12}\n", label, bytes(original), bytes(stored), reduction);
 }
 
 static int run(const std::vector<std::string>& arguments)
@@ -461,6 +653,10 @@ static int run(const std::vector<std::string>& arguments)
             check(!movie.jxl, "encode requires an MJPEG input");
             const fs::path output(secondPath);
             check(!fs::exists(output), "Output already exists");
+            auto extension = output.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            check(extension == ".avi" || extension == ".mkv", "Output extension must be .avi or .mkv");
+            const bool matroska = extension == ".mkv";
             auto partial = output; partial += ".partial";
             const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate};
             const auto pcm = pcm_of(movie);
@@ -486,49 +682,84 @@ static int run(const std::vector<std::string>& arguments)
             if (!keepOriginal) {
                 std::cout << "WARNING: This output cannot restore the original file; keep the original\n";
             }
-            AviWriter writer(partial, movie, MJXL, flac ? &*flac : nullptr);
+            std::unique_ptr<AviWriter> avi;
+            std::unique_ptr<MatroskaWriter> mkv;
+            if (matroska) {
+                mkv = std::make_unique<MatroskaWriter>(partial, movie, flac ? &*flac : nullptr, originalData);
+            } else {
+                avi = std::make_unique<AviWriter>(partial, movie, MJXL, flac ? &*flac : nullptr);
+            }
+            const auto write_packet = [&](bool video, std::span<const uint8_t> bytes) {
+                if (mkv) {
+                    mkv->packet(video, bytes);
+                } else {
+                    avi->packet(video, bytes);
+                }
+            };
             unsigned frames = 0;
+            uint64_t originalVideoBytes = 0, originalAudioBytes = 0;
+            uint64_t storedVideoBytes = 0, storedAudioBytes = 0;
             size_t nextAudio = 0;
             // Write each FLAC frame before the video frame at its playback time.
             const auto write_audio_until = [&](int64_t frame) {
                 while (flac && nextAudio < flac->packets.size() &&
                        flac->packets[nextAudio].position * movie.fps.num <= frame * movie.fps.den * movie.sampleRate) {
-                    writer.packet(false, flac->packets[nextAudio].bytes);
+                    write_packet(false, flac->packets[nextAudio].bytes);
+                    storedAudioBytes += flac->packets[nextAudio].bytes.size();
                     ++nextAudio;
                 }
             };
             for (const auto& p : movie.packets) {
                 if (p.video) {
+                    originalVideoBytes += p.bytes.size();
                     write_audio_until(frames);
                     const auto encoded = codec.encode(p.bytes, effort);
                     check(codec.jpeg(encoded) == p.bytes, "JPEG round-trip verification failed");
-                    writer.packet(true, encoded);
+                    write_packet(true, encoded);
+                    storedVideoBytes += encoded.size();
                     ++frames;
                     if (frames % 60 == 0) { std::cout << "Encoded " << frames << " frames\n"; }
-                } else if (!flac) {
-                    writer.packet(false, p.bytes);
+                } else {
+                    originalAudioBytes += p.bytes.size();
+                    if (!flac) {
+                        write_packet(false, p.bytes);
+                        storedAudioBytes += p.bytes.size();
+                    }
                 }
             }
             if (flac) {
                 // Write all audio remaining after the last video frame.
                 write_audio_until(INT64_MAX / (int64_t(movie.fps.den) * movie.sampleRate));
             }
-            writer.finish(originalData);
+            if (mkv) {
+                mkv->finish();
+            } else {
+                avi->finish(originalData);
+            }
             verify(movie, partial, codec);
             if (!originalData.empty()) {
                 // Verify complete original-file reconstruction from the saved AVI before finalizing its name.
                 const auto stored = read_original_chunk(partial);
-                check(rebuild_from_avi(read_movie(partial), stored, codec) == sourceFile, "Original file verification failed");
-                std::cout << "Verified exact original file: " << sourceFile.size() << " bytes, stored " << originalData.size() << " bytes of container data\n";
+                check(rebuild_from_container(read_movie(partial), stored, codec) == sourceFile, "Original file verification failed");
+                std::cout << "Verified exact original file: " << sourceFile.size() << " bytes, stored " << originalData.size() << " bytes of recovery data\n";
             }
             fs::rename(partial, output);
             const auto savedSize = fs::file_size(output);
-            const double reduction = sourceFile.empty() ? 0.0 : 100.0 * (1.0 - static_cast<double>(savedSize) / static_cast<double>(sourceFile.size()));
-            std::cout << "Saved " << savedSize << " bytes (" << std::format("{:.2f}", reduction) << "% smaller than " << sourceFile.size() << " bytes): " << utf8(output) << '\n';
+            std::cout << "\nCompression summary (bytes; negative reduction means growth):\n";
+            std::cout << std::format("{:<20} {:>18}    {:>18} {:>12}\n", "Component", "Original", "Stored", "Reduction");
+            print_size_row("Audio", originalAudioBytes, storedAudioBytes);
+            print_size_row("Video", originalVideoBytes, storedVideoBytes);
+            print_size_row("Container / recovery", sourceFile.size() - originalVideoBytes - originalAudioBytes,
+                           savedSize - storedVideoBytes - storedAudioBytes);
+            print_size_row("Total file", sourceFile.size(), savedSize);
+            std::cout << "Saved: " << utf8(output) << '\n';
         } else if (command == "restore") {
-            check(movie.jxl, "restore requires an MJXL AVI input");
+            check(movie.jxl, "restore requires an MJXL input");
             const fs::path output(secondPath);
             check(!fs::exists(output), "Output already exists");
+            auto extension = output.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            check(extension == ".avi", "restore writes MJPEG AVI; output extension must be .avi");
             auto partial = output; partial += ".partial";
             AviWriter writer(partial, movie, fourcc('M', 'J', 'P', 'G'));
             std::unique_ptr<mjxl::FlacDecoder> decoder;
@@ -555,14 +786,14 @@ static int run(const std::vector<std::string>& arguments)
             fs::rename(partial, output);
             std::cout << "Restored exact JPEG packets and PCM samples to " << utf8(output) << '\n';
         } else if (command == "restore-original") {
-            check(movie.jxl, "restore-original requires an MJXL AVI input");
+            check(movie.jxl, "restore-original requires an MJXL input");
             const fs::path output(secondPath);
             check(!fs::exists(output), "Output already exists");
             auto partial = output; partial += ".partial";
             check(!fs::exists(partial), "Partial output already exists");
             const auto stored = read_original_chunk(firstPath);
-            check(!stored.empty(), "This AVI holds no original file data; encode it again from the original file");
-            const auto rebuilt = rebuild_from_avi(movie, stored, codec);
+            check(!stored.empty(), "This file holds no original file data; encode it again from the original file");
+            const auto rebuilt = rebuild_from_container(movie, stored, codec);
             {
                 std::ofstream file(partial, std::ios::binary);
                 file.write(reinterpret_cast<const char*>(rebuilt.data()), static_cast<std::streamsize>(rebuilt.size()));
@@ -576,14 +807,14 @@ static int run(const std::vector<std::string>& arguments)
             const auto stored = read_original_chunk(secondPath);
             if (stored.empty()) {
                 // This check may justify deleting an original, so fail if reconstruction is unavailable.
-                check(noOriginal, "This AVI holds no original file data, so the original file cannot be restored from it");
-                std::cout << "WARNING: This AVI holds no original file data; keep the original\n";
+                check(noOriginal, "This file holds no original file data, so the original file cannot be restored from it");
+                std::cout << "WARNING: This file holds no original file data; keep the original\n";
             } else {
-                check(rebuild_from_avi(read_movie(secondPath), stored, codec) == read_file(firstPath), "Original file verification failed");
+                check(rebuild_from_container(read_movie(secondPath), stored, codec) == read_file(firstPath), "Original file verification failed");
                 std::cout << "Verified exact original file\n";
             }
         } else if (command == "bench") {
-            check(movie.jxl, "bench requires an MJXL AVI");
+            check(movie.jxl, "bench requires an MJXL file");
             const auto start = std::chrono::steady_clock::now();
             unsigned frames = 0;
             for (const auto& p : movie.packets) {

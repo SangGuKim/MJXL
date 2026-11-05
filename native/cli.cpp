@@ -32,11 +32,11 @@ const std::vector<OptionSpec> kOptions = {
 };
 
 const std::vector<CommandSpec> kCommands = {
-    {"encode", "<input> <output.avi>", 2, "Compress an MJPEG video into an MJXL AVI and verify it", {Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
-    {"verify", "<original> <encoded.avi>", 2, "Compare an MJXL AVI with its original file", {Option::NoOriginal, Option::Help}},
-    {"restore-original", "<encoded.avi> <output>", 2, "Rebuild the original file byte for byte", {Option::Help}},
-    {"restore", "<encoded.avi> <output.avi>", 2, "Write the original JPEG frames and PCM as an MJPEG AVI", {Option::Help}},
-    {"bench", "<encoded.avi>", 1, "Measure JXL decoding speed", {Option::Help}},
+    {"encode", "<input> <output.avi|output.mkv>", 2, "Compress an MJPEG video into MJXL AVI or MKV (selected by extension) and verify it", {Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
+    {"verify", "<original> <encoded>", 2, "Compare an MJXL AVI or MKV with its original file", {Option::NoOriginal, Option::Help}},
+    {"restore-original", "<encoded> <output>", 2, "Rebuild the original file byte for byte", {Option::Help}},
+    {"restore", "<encoded> <output.avi>", 2, "Write the original JPEG frames and PCM as an MJPEG AVI", {Option::Help}},
+    {"bench", "<encoded>", 1, "Measure JXL decoding speed", {Option::Help}},
 };
 
 const CommandSpec* find_command(std::string_view name)

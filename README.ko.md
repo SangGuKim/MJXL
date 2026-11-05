@@ -1,8 +1,18 @@
-# MJXL
+# MJXL — Motion JPEG XL
 
 [English](README.md) | **한국어**
 
-기존 MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축해 저장 공간을 줄이는 Windows·Linux 실험 프로젝트이다. 네이티브 CLI는 독립 JXL 프레임을 실험용 FourCC `MJXL`의 AVI에 저장한다. 기본적으로 원본 파일 전체를 바이트 단위로 복원하는 정보도 포함한다. PCM 음성은 기본적으로 무손실 FLAC으로 저장하며 `--copy-audio`를 주면 그대로 복사한다.
+기존 MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축해 저장 공간을 줄이는 Windows·Linux 실험 프로젝트이다. 네이티브 CLI는 독립 JXL 프레임을 실험용 FourCC `MJXL`의 AVI 또는 Matroska(MKV)에 저장한다. 두 컨테이너 모두 기본적으로 원본 파일 전체를 바이트 단위로 복원하는 정보도 포함한다. PCM 음성은 기본적으로 무손실 FLAC으로 저장하며 `--copy-audio`를 주면 그대로 복사한다.
+
+## 왜 MJPEG를 이런 방식으로 보존하는가?
+
+오래된 카메라 영상에 많이 쓰인 Motion JPEG는 각 영상 프레임이 JPEG 이미지인 형식이다. JPEG XL은 지원하는 JPEG 비트스트림을 가역 재압축하고 원래 JPEG 바이트를 정확하게 복원할 수 있다. **Motion JPEG XL은 이 기능을 MJPEG 영상의 모든 프레임에 적용한다.** 기존 JPEG 압축과 그 아티팩트를 그대로 보존하면서 추가적인 세대 손실 없이 크기를 줄인다.
+
+작은 감상용 파일이 목적이면 손실 H.265 인코딩이 더 적합할 수 있다. 이 프로젝트의 목적은 원본을 복원할 수 있는 보존용 사본이다. 손실 재인코딩은 비슷하게 보이더라도 원래 JPEG 비트스트림을 재현하지 못한다. 디코딩한 픽셀을 무손실로 압축하는 것만으로도 원래 JPEG 파일이나 MOV 컨테이너가 보존되는 것은 아니다.
+
+약 16%의 절감에도 의미가 있는 이유이다. 원본의 일부를 희생해 훨씬 작은 파일을 만드는 대신, 원본 복원 가능성을 유지하며 공간을 확보한다. 절감률은 입력에 따라 달라지며 보장하지 않는다. MJXL은 JPEG→JXL 가역 재압축, 음성 무손실 저장, Brotli로 압축한 컨테이너 복원 정보를 결합한다. 따라서 `restore-original`로 소스 파일 전체를 바이트 단위로 복원하고 SHA-256을 확인할 수 있다. 원본 미디어 데이터 자체를 한 벌 더 저장하지 않는다.
+
+MJXL은 실험용 프로젝트 이름과 FourCC이며 표준화된 영상 코덱은 아니다. 아티팩트 보정은 이미지를 바꾸므로 별도의 감상용 파생본에서 다룰 일이며, 가역 보존 경로에는 포함하지 않는다.
 
 **Windows 빌드는 CMake 프로젝트이다.** 루트의 `CMakeLists.txt`에서 시작한다. Visual Studio 솔루션과 프로젝트는 로컬에서 생성하며 Git에 넣지 않는다. Linux CLI는 `native/Makefile`로 빌드한다.
 
@@ -36,6 +46,8 @@ VS2026의 v145 C++ 도구 집합과 Windows SDK, CMake(VS 동봉 버전 지원),
 New-Item -ItemType Directory -Path results -Force
 $mjxl = '.\dist\Release\mjxl.exe'
 & $mjxl encode input.mov results\output.avi
+# 출력 확장자로 Matroska 컨테이너를 선택한다.
+& $mjxl encode input.mov results\output.mkv
 & $mjxl verify input.mov results\output.avi
 & $mjxl restore-original results\output.avi results\restored.mov
 & $mjxl restore results\output.avi results\restored-mjpeg.avi
@@ -46,6 +58,12 @@ $mjxl = '.\dist\Release\mjxl.exe'
 `restore-original`은 원본 파일 전체를 복원하고 SHA-256을 검사한다. `restore`는 보존한 JPEG 패킷과 PCM 표본으로 MJPEG AVI를 만든다. `verify`는 원본 전체의 복원을 소스와 비교하므로 원본을 지우기 전에 실행한다. 복원 정보를 보존할 수 없으면 `encode`가 실패하며, `--no-original`로 명시적으로 생략한다. 이 옵션으로 만든 파일과 이전 버전의 AVI는 원본 전체를 복원할 수 없다.
 
 FLAC 저장은 8/16/24비트 PCM을 지원하며 32비트 PCM은 PCM으로 둔다. 입력 음성은 PCM이거나 MJXL 메타데이터가 있는 FLAC이어야 하며, 다른 코덱은 `--copy-audio` 여부와 관계없이 거부한다. 원래 8비트 PCM은 16비트 FLAC의 상위 바이트에 저장하고 AVI 음성 메타데이터로 정확히 복원한다. 압축 강도는 1~10이고 기본값은 7이다. 높다고 항상 더 작은 파일이 되지는 않는다. 옵션은 명령 뒤에 쓴다. 상세한 규칙은 `mjxl --help`와 `mjxl encode --help`를 참고한다.
+
+인코딩과 검증이 성공하면 음성·영상·컨테이너/복원 정보·파일 전체에 대해 원본 바이트 수, 저장 바이트 수, 절감률을 표로 표시한다. 음성·영상은 스트림 데이터만 계산하고, 컨테이너/복원 정보에는 헤더·인덱스·패딩·원본 복원 정보가 포함된다. 전체 크기는 이 비용을 모두 포함한다. 절감률이 음수이면 크기가 늘어난 것이며, 원본이 0바이트이면 `n/a`로 표시한다.
+
+`encode`는 출력 확장자 `.avi` 또는 `.mkv`로 컨테이너를 선택하며 대소문자는 구분하지 않는다. 다른 출력 확장자는 거부한다. MKV는 FFmpeg의 Matroska 작성기로 `V_MS/VFW/FOURCC`와 `MJXL`을 기록하며, 원본 복원 정보는 MIME 형식이 `application/x-mjxl-original`인 `mjxl-original.bin` 첨부 데이터에 보관한다. FLAC 트랙의 `MJXL_ORIGINAL_BITS` 메타데이터에 원래 PCM 비트 깊이를 남긴다. `verify`·`restore-original`·`bench`는 두 컨테이너를 모두 읽는다. `restore`는 항상 MJPEG AVI를 쓰며 `.avi` 확장자가 필요하다. 같은 입력과 압축 강도에서 미디어 데이터는 같지만 컨테이너 비용은 다르다. 검사한 샘플 4개에서는 MKV가 AVI보다 970~21,638바이트 컸으며, 더 작은 컨테이너 비용을 보장하지 않는다.
+
+MOV 샘플 4개의 두 음성 모드에서 MKV 변환, 원본 파일 전체 복원, FFmpeg 영상·음성 디코딩을 통과했다. 사용자는 4.2초 PCM·FLAC MKV의 팟플레이어 재생과 탐색이 정상임을 확인했다. 해당 MKV의 탐색기 썸네일은 표시되지 않았으며 Preview 창은 검사하지 않았다. 이번 변경은 썸네일 처리기를 설치하지 않는다. MKV의 CLI 왕복 검사를 반복하려면 `native/validate_cli.py`에 `--container mkv`를 추가하고 새 출력 폴더를 사용한다. 현재 MKV 구현은 Windows에서 검사했으며 Linux에서는 아직 재빌드하거나 검사하지 않았다.
 
 ## 재생과 호환성
 
@@ -77,9 +95,13 @@ ffmpeg -v error -xerror -c:v libjxl -i results/output.avi -map 0:v:0 -map '0:a:0
 
 실행할 배포판에서 빌드한다. 시스템 공유 라이브러리에 동적으로 링크하며 libjxl 버전에 따라 압축 크기도 달라질 수 있다. `ffmpeg -decoders`에서 `libjxl`을 확인한다. FFmpeg의 `-c:v libjxl`은 `-i` 앞에 쓰고 ffplay는 `-vcodec libjxl`을 사용한다. 이 명령은 원래 JPEG 파일 바이트가 아니라 픽셀을 디코딩한다. FFmpeg FourCC 매핑과 GStreamer 플러그인은 추가하지 않았다.
 
+## 향후 재생 지원 계획
+
+GStreamer(`gst`) 연동과 macOS 재생 지원을 추진할 계획이다. 둘 다 아직 구현하거나 검증하지 않았다. 현재 Windows DirectShow와 Linux FFmpeg 경로를 넘어 같은 가역 보존 파일을 재생할 수 있도록 하는 것이 목표이며, 기존 macOS 플레이어에서 지금 MJXL을 열 수 있다는 뜻은 아니다.
+
 ## 범위와 검증
 
-네이티브 작성기는 고정 프레임 레이트, 영상 한 개, 음성 최대 한 개, 2GiB 미만의 classic AVI를 지원한다. 입력 패킷을 메모리에 보관한다. OpenDML·대용량 스트리밍·아티팩트 보정·움직임 예측은 구현하지 않았다.
+네이티브 작성기는 고정 프레임 레이트, 영상 한 개, 음성 최대 한 개를 지원한다. 직접 구현한 AVI 작성기는 2GiB 미만의 classic AVI로 제한되며 MKV는 FFmpeg를 사용한다. 두 경로 모두 입력 패킷을 메모리에 보관하고 대용량 MKV는 검증하지 않았다. OpenDML·대용량 스트리밍·아티팩트 보정·움직임 예측은 구현하지 않았다.
 
 기존 기록은 7개 샘플·1,332프레임의 JPEG·PCM 정확한 복원, 원본 파일 SHA-256, DirectShow 재생·탐색을 포함한다. Linux PCM·FLAC 변환에서 원본 복원과 FFmpeg 디코딩을 통과했다. Linux ffplay는 SDL 더미 출력으로 검사했으며 실제 화면 출력과 음성 청취는 검증하지 않았다. 과거 결과가 모든 파일과 PC에서의 성공을 보장하지는 않는다.
 

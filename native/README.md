@@ -46,6 +46,12 @@ Full linking and execution were verified on Ubuntu 24.04 WSL2 x86-64 with GCC 13
 
 ## Encoding, verification, and restoration
 
+`encode` selects AVI or MKV by the output extension (`.avi` / `.mkv`, case-insensitive); other extensions are rejected. For example, `mjxl encode input.mov output.mkv` uses FFmpeg's Matroska muxer with `V_MS/VFW/FOURCC` and FourCC `MJXL`. `verify`, `restore-original`, and `bench` read both containers. `restore` still produces MJPEG AVI and requires `.avi`.
+
+MKV stores Brotli-compressed original-file recovery data as the `mjxl-original.bin` attachment (`application/x-mjxl-original`) instead of an AVI `mjxo` chunk. Original PCM depth is stored in the FLAC track's `MJXL_ORIGINAL_BITS` tag instead of `mjxa`. The CLI recognizes this recovery attachment but rejects unrelated extra streams. `--no-original` also works with MKV. Container overhead can be larger than AVI: the four tested samples grew by 970–21,638 bytes with identical media payloads and effort. Neither the AVI DirectShow graph test nor the MFT test establishes MKV support.
+
+On Windows, all four MOV samples passed MKV PCM/FLAC encoding, exact original-file reconstruction, and FFmpeg video/audio decoding. Synthetic video-only and 16/24/32-bit stereo cases also passed, including PCM32 fallback. PotPlayer playback and seeking were confirmed by the user on the 4.2-second PCM and FLAC MKVs. Explorer thumbnails were absent; the Preview pane and Linux MKV build were not tested. No shell thumbnail handler is installed. Run `native/validate_cli.py --container mkv` with the usual binary/sample/output arguments and a fresh output folder to repeat the MKV round-trip suite.
+
 ```powershell
 $mjxl = '.\dist\Release\mjxl.exe'
 & $mjxl encode input.mov results\example.avi
@@ -55,7 +61,7 @@ $mjxl = '.\dist\Release\mjxl.exe'
 & $mjxl bench results\example.avi
 ```
 
-`encode` checks exact JPEG reconstruction and, when applicable, FLAC-to-PCM reconstruction before writing. It rereads the AVI and compares every JPEG packet and all PCM bytes. Run `mjxl --help` or `mjxl encode --help` for command-specific options. Options may appear anywhere after the command, but not before it. Unsupported options are rejected.
+`encode` checks exact JPEG reconstruction and, when applicable, FLAC-to-PCM reconstruction before writing. It rereads the output container and compares every JPEG packet and all PCM bytes. Run `mjxl --help` or `mjxl encode --help` for command-specific options. Options may appear anywhere after the command, but not before it. Unsupported options are rejected.
 
 `-e 1-10` / `--effort 1-10` selects JXL effort; the default is 7. Higher effort does not guarantee a smaller result. One recorded 21-frame experiment found effort 8 roughly three times slower for about 0.2 percentage points more savings; 9 and 10 were over 30 times slower without further savings in that experiment. Other measurements are recorded in [STATUS.md](../STATUS.md). Existing files are not overwritten. Output uses `.partial` until verification succeeds.
 

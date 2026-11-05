@@ -51,6 +51,12 @@ Linux 빌드는 CLI만 제공하며 GStreamer·FFmpeg용 재생 플러그인을 
 
 ## 변환·복원·검증
 
+`encode`는 출력 확장자 `.avi` 또는 `.mkv`로 컨테이너를 선택하며 대소문자는 구분하지 않는다. 다른 확장자는 거부한다. 예를 들어 `mjxl encode input.mov output.mkv`는 FFmpeg의 Matroska 작성기로 `V_MS/VFW/FOURCC`와 FourCC `MJXL`을 기록한다. `verify`·`restore-original`·`bench`는 두 컨테이너를 읽으며, `restore`는 여전히 MJPEG AVI를 생성하므로 `.avi`가 필요하다.
+
+MKV에서는 Brotli로 압축한 원본 복원 정보를 AVI의 `mjxo` 대신 `mjxl-original.bin` 첨부 데이터(`application/x-mjxl-original`)에 저장한다. 원래 PCM 비트 깊이는 `mjxa` 대신 FLAC 트랙의 `MJXL_ORIGINAL_BITS` 태그에 남긴다. CLI는 이 복원용 첨부 데이터를 인식하지만 관련 없는 추가 스트림은 거부한다. MKV에도 `--no-original`을 쓸 수 있다. 같은 미디어 데이터와 압축 강도를 사용한 샘플 4개에서 MKV가 AVI보다 970~21,638바이트 컸다. AVI용 DirectShow 그래프 검사와 MFT 검사로 MKV 지원을 확인할 수는 없다.
+
+Windows에서 MOV 샘플 4개의 MKV PCM·FLAC 변환, 원본 파일 전체의 정확한 복원, FFmpeg 영상·음성 디코딩을 통과했다. 합성한 무음 및 16/24/32비트 스테레오도 PCM32 유지 경로를 포함해 통과했다. 사용자는 4.2초 PCM·FLAC MKV의 팟플레이어 재생과 탐색을 확인했다. 탐색기 썸네일은 표시되지 않았으며 Preview 창과 Linux MKV 빌드는 검사하지 않았다. 셸 썸네일 처리기는 설치하지 않는다. MKV 왕복 검사를 반복하려면 `native/validate_cli.py --container mkv`에 기존 실행 파일·샘플·출력 인자를 지정하고 새 출력 폴더를 사용한다.
+
 ```powershell
 $mjxl = '.\dist\Release\mjxl.exe'
 & $mjxl encode .\samples\IMG_20040318_225819.MOV .\results\example.avi

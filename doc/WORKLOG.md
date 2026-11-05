@@ -106,3 +106,54 @@ The user reported that FLAC plays without problems and asked to make it the defa
 The four samples passed encode, verify, and original-file SHA-256 checks in both modes. Both sets of AVIs also passed DirectShow video playback and seeking and FFmpeg audio decoding (`results/windows-copy-audio-validation`). The default output contains `flac` audio and the `--copy-audio` output contains `pcm_u8`. Default sizes for `IMG_20040402_034913` were 22,320,444 bytes with FLAC and 22,592,870 bytes with copied audio at effort 7.
 
 Earlier records still apply to FLAC AVI: Windows has no built-in DirectShow decoder for it, and Media Foundation AVI sources stall on it. Use `--copy-audio` for those paths. Fresh Explorer thumbnail generation was not retested with the new default.
+
+### Follow-up review and continuation notes
+
+- Confirmed local HEAD and remote `main` at `6af9d708879d183a96b079aabfffe6e3021b1085`; the checkout was clean before this note. Do not revert the intentional FLAC default or reintroduce `--flac` in examples. Historical entries describe older behavior.
+- Independently reran the current CLI's `verify` on all eight outputs in `results/windows-copy-audio-validation` (four originals, PCM and FLAC). Exact JPEG/PCM and complete original-file verification passed; source SHA-256 and output sizes also matched the report. This review did not repeat encoding or audible playback.
+- Audited 51 tracked text files: Korean appeared only in `.ko.md` companions, and local Markdown links resolved. The pushed commit passed Git whitespace checks.
+- Future muxer regression checks should use fresh output directories. `validate_native.py` verifies an existing AVI instead of re-encoding it; passing verification alone does not prove that its header was written by the current muxer.
+- Original-file recovery stores the layout table and all non-media bytes separately compressed with Brotli at maximum quality in `mjxo`. This includes container metadata and padding, not just the MOV header. JPEG/PCM payloads are reconstructed from the media streams instead of duplicated; the original SHA-256 validates the result.
+
+## 2026-11-05: Component statistics and project motivation
+
+Encoding now ends with a byte-count table for audio, video, container/recovery data, and the total file, showing original size, stored size, and reduction. Stream rows count packet payloads; the remaining row accounts for all container overhead and reconstruction data so totals reconcile. Negative reductions indicate growth, and zero-byte baselines display `n/a`.
+
+The root English and Korean READMEs introduce MJXL as Motion JPEG XL and connect JPEG XL's reversible JPEG recompression to complete original-file preservation. They explain why modest savings can be useful for an archive, distinguish this goal from lossy H.265 viewing copies and pixel-only losslessness, and identify GStreamer integration and macOS playback as future work rather than existing support.
+
+Built the Windows CLI and tested a real 63-frame MOV with default FLAC and `--copy-audio`, plus a video-only AVI. Compared every reported byte count and percentage against independent FFprobe input packet totals and output RIFF chunk totals. All three outputs also passed exact original-file verification. Test outputs are in `C:/Temp/mjxl-stats-validation`; effort 1 was used for this check, not as a compression benchmark. Installed binaries were not updated. No commit or push was performed.
+
+## 2026-11-05: Experimental MKV output using FFmpeg
+
+`encode` now selects AVI or Matroska from the final output extension, case-insensitively. Other output extensions are rejected instead of writing disguised AVI. MKV uses FFmpeg's existing Matroska muxer with `V_MS/VFW/FOURCC` and `MJXL`; no additional library is required. Original-file reconstruction data is an attachment named `mjxl-original.bin`, with MIME type `application/x-mjxl-original`. FLAC's original PCM depth uses the audio track tag `MJXL_ORIGINAL_BITS`. AVI keeps its existing `mjxo` and `mjxa` representation. `verify`, `restore-original`, and `bench` accept MKV; `restore` writes only MJPEG AVI and now checks that output extension.
+
+The reader accepts the dedicated recovery attachment and rejects unrelated additional streams. Duplicate recovery attachments and missing reconstruction data are rejected by complete-original recovery. `--no-original` requires the same explicit verification opt-in as AVI. The validation script accepts `--container avi|mkv` (default AVI); reports now use the container-neutral `encoded_bytes` field and include `container`.
+
+Validation on Windows:
+
+- `results/matroska-v1`: four actual MOV sources, each with copied PCM and default FLAC, passed encode, JPEG/PCM verification, physical original-file restoration with SHA-256 comparison, and FFmpeg full video/audio decoding. MJPEG AVI restoration and RGB decoding also passed.
+- `results/matroska-edge-v1`: generated video-only and 16/24/32-bit stereo sources passed both audio modes, exact restoration, MJPEG AVI restoration, and FFmpeg decoding. PCM32 remained PCM. Uppercase `.MKV`, no-original refusal/opt-in, unsupported extensions, output overwrite refusal, old AVI inputs, and new AVI outputs passed.
+- The user confirmed PotPlayer video/audio playback and seeking on both 4.2-second MKVs. The user clarified that Explorer **thumbnails**, not the Preview pane, were absent. Preview was not tested. No thumbnail provider, registry registration, codec installation, or thumbnail cache change was made.
+- The four samples' MKVs were 970–21,638 bytes larger than same-effort AVI outputs, despite identical media payloads. For `IMG_20040402_034913` at effort 7: copied PCM AVI 22,592,870 bytes versus MKV 22,605,136; FLAC AVI 22,320,444 versus MKV 22,340,768. MKV overhead is not assumed smaller.
+
+The CLI is rebuilt in `dist/Release`; the installed local copy was not updated. Linux compilation of the MKV path, large MKV files, and DirectShow/MFT MKV graph tests were not performed. Existing graph tests explicitly use AVI Splitter and must not be cited as MKV validation. Future thumbnail options include a dedicated MJXL shell thumbnail provider, or JPEG cover attachments plus a supporting provider such as Icaros; neither was implemented here. No commit or push was performed.
+
+## 2026-11-05: MOV feasibility and end-of-session handoff
+
+The user asked whether MOV can carry MJXL. A diagnostic remux with the installed FFmpeg SDK succeeded for MJXL video tagged `MJXL` and copied PCM8 audio. The validated file is `C:/Temp/mjxl-mov-pcm-check.mov` (2,575,893 bytes), sourced from `results/windows-copy-audio-validation/pcm/IMG_20040318_230535.avi` with the parser disabled. It passed `mjxl verify samples/IMG_20040318_230535.MOV C:/Temp/mjxl-mov-pcm-check.mov --no-original`: 63 exact JPEG frames and 33,768 exact PCM bytes. FFmpeg full video/audio decoding also passed. The video is 15 fps with time base 1/15360, and audio uses 1/8040. PotPlayer playback and Explorer thumbnails for this MOV were not tested.
+
+The diagnostic command, with SDK and checkout paths adjusted as needed, was:
+
+```powershell
+& "$env:FFMPEG_PATH/bin/ffmpeg.exe" -v error -n -fflags +noparse+nofillin -c:v libjxl -i results/windows-copy-audio-validation/pcm/IMG_20040318_230535.avi -map 0:v:0 -map 0:a:0 -c copy -tag:v MJXL -f mov C:/Temp/mjxl-mov-pcm-check.mov
+```
+
+This is only a feasibility file: the remux omitted original-file recovery data. Do not use it as a complete original-file archive or delete the source based on its media-only verification. An earlier remux from the MKV control (`C:/Temp/mjxl-mov-feasibility.mov`) retained rounded millisecond timestamps and failed the CLI's constant-frame-rate check; do not confuse it with the validated AVI-sourced file. The FLAC-to-MOV attempt (`C:/Temp/mjxl-mov-flac-feasibility.mov`) failed at header writing with `flac only supported in MP4`; it is not a usable result. None of these diagnostic files were deleted.
+
+MOV output is **not** implemented in the CLI: `.mov` remains rejected. Future implementation needs MOV writing with copied PCM, a defined private atom for recovery data plus read/verify/restore support, and playback/thumbnail tests. Do not infer QuickTime or macOS playback support from successful muxing or forced FFmpeg decoding. MP4 support was not established by these tests.
+
+At the user's request, stop here for today. The checkpoint is remote/local `main` commit `6af9d70` plus uncommitted changes to 10 tracked files: root READMEs, native READMEs, both work logs, `native/encoder.cpp`, `native/cli.cpp`, `native/original_file.hpp`, and `native/validate_cli.py`. These include component statistics, project motivation/roadmap, and experimental MKV support. The CLI in `dist/Release` was rebuilt; the installed copy was not updated. No installation, commit, push, or cleanup deletion was performed. Preserve these changes and the ignored sample/results/build files when resuming. Next steps, when requested, are MOV support and/or a dedicated Explorer thumbnail path; neither is authorized to continue automatically after this stop.
+
+### Follow-up: requested source checkpoint
+
+The user subsequently requested committing and pushing today's source and documentation so work can resume on another PC. The preceding uncommitted/no-push status describes the state before that request. This checkpoint contains source and documentation only; samples, diagnostic media, dependencies, and build outputs remain local and ignored. On another PC, fetch/pull `main`, prepare dependencies, and rebuild before installing. Do not assume the `C:/Temp` MOV diagnostics or ignored `results` files are available there. No further implementation is requested tonight.

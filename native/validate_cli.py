@@ -12,6 +12,7 @@ def main():
     parser.add_argument('--samples', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--compatible-avi', type=Path)
+    parser.add_argument('--container', choices=('avi', 'mkv'), default='avi')
     args = parser.parse_args()
     binary = args.binary.resolve()
     sources = sorted(p for p in args.samples.iterdir() if p.suffix.lower() == '.mov')
@@ -31,17 +32,17 @@ def main():
         for mode in ('pcm', 'flac'):
             folder = args.output / mode
             folder.mkdir(exist_ok=True)
-            avi = folder / (source.stem + '.avi')
+            encoded = folder / (source.stem + '.' + args.container)
             restored = folder / (source.stem + '.restored.mov')
-            run('encode', source, avi, *(['--copy-audio'] if mode == 'pcm' else []))
-            verification = run('verify', source, avi)
-            run('restore-original', avi, restored)
+            run('encode', source, encoded, *(['--copy-audio'] if mode == 'pcm' else []))
+            verification = run('verify', source, encoded)
+            run('restore-original', encoded, restored)
             if hashlib.sha256(restored.read_bytes()).hexdigest() != digest:
                 raise RuntimeError(f'Original hash differs: {source} ({mode})')
             # Remove comparison restore files after verification; retain encoded files and reports.
             restored.unlink()
             records.append(dict(source=source.name, mode=mode, original_bytes=source.stat().st_size,
-                                avi_bytes=avi.stat().st_size, sha256=digest, verification=verification))
+                                container=args.container, encoded_bytes=encoded.stat().st_size, sha256=digest, verification=verification))
             print(f'PASS {mode}: {source.name}', flush=True)
     if args.compatible_avi:
         verification = run('verify', sources[0], args.compatible_avi)
@@ -51,8 +52,8 @@ def main():
             raise RuntimeError('Compatible AVI restored bytes differ')
         restored.unlink()
         print(f'PASS compatible AVI: {args.compatible_avi}', flush=True)
-    run('restore', args.output / 'flac' / (sources[0].stem + '.avi'), args.output / 'restored-mjpeg.avi')
-    print(run('bench', args.output / 'flac' / (sources[0].stem + '.avi')), flush=True)
+    run('restore', args.output / 'flac' / (sources[0].stem + '.' + args.container), args.output / 'restored-mjpeg.avi')
+    print(run('bench', args.output / 'flac' / (sources[0].stem + '.' + args.container)), flush=True)
     (args.output / 'cli-report.json').write_text(json.dumps(records, indent=2) + '\n', encoding='utf-8')
     print(f'PASS {len(records)} encodes and exact original restores', flush=True)
 
