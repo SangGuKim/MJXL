@@ -16,6 +16,6 @@ struct AudioSelection {
 AudioCodec parse_audio_codec(std::string_view name);
 /** @brief Returns the stable CLI name of a codec. */
 std::string_view audio_codec_name(AudioCodec codec);
-/** @brief Resolves policy; explicit unsupported FLAC formats throw instead of falling back. */
+/** @brief Resolves policy; explicit unsupported codec formats throw instead of falling back. */
 AudioSelection select_audio(Container container, AudioCodec requested, const PcmFormat& format);
 }

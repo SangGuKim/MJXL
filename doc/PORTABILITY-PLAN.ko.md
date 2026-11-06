@@ -5,6 +5,13 @@
 작성일: 2026-11-06. 상태: 단계별 구현 중인 설계안이다. 이 문서는 FFmpeg 필수 의존성 제거, MOV 입출력, GStreamer 재생, macOS 지원을 하나의 로드맵으로 정의한다. 아래의 새 API·타깃·옵션 이름은 제안이며 현재 제공 기능이 아니다.
 
 
+
+## ALAC·MOV 구현 상태: 2026-11-06
+
+Apple 공개 ALAC의 독립 인코딩·디코딩, 자체 MOV writer와 MJXO/MJXA 복원 atom을 구현했다. MOV는 ALAC 기본, MKV는 명시적 ALAC과 FLAC 기본, AVI는 FLAC 기본과 명시적 private ALAC 실험을 제공한다. 첫 checkpoint의 ALAC/MOV 미구현 설명은 당시 상태이며 현재 상태가 아니다.
+
+실제 입력 56개 및 합성 입력 30개 조합의 정확 복원·외부 PCM·payload 동일성을 검증했다. AVI ALAC은 FFmpeg 자동 인식에 실패하므로 기본값 통일은 보류한다. [압축률·호환성 결과](AUDIO-CONTAINERS.ko.md)와 [구현 프로필](MOV-ALAC-PROFILE.ko.md)을 기준으로 후속 구현을 진행한다. 컨테이너 읽기와 MKV 쓰기의 FFmpeg 의존성 제거, GStreamer와 macOS 앱·확장은 아직 남아 있다.
+
 ## 2026-11-06 구현 상태
 
 첫 구현에서는 크기 통계, 계층 분리의 기반, libFLAC/SHA-256 교체를 반영한다. CLI 컨테이너 backend는 아직 FFmpeg를 필수로 사용한다. MOV/ALAC, 자체 AVI/MOV reader, 독립 MKV backend, GStreamer, macOS 앱·확장은 아직 구현하지 않았다.

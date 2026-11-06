@@ -2,7 +2,7 @@
 
 **English** | [Korean](README.ko.md)
 
-MJXL is an experimental Windows and Linux project that reduces existing MJPEG videos by reversibly recompressing their JPEG frames with JPEG XL. Its native CLI stores independent JXL frames in AVI or Matroska (MKV) with the experimental `MJXL` FourCC. By default, either container also contains the information needed to restore the complete original file byte for byte. PCM audio is stored as lossless FLAC by default; `--copy-audio` copies it unchanged.
+MJXL is an experimental Windows and Linux project that reduces existing MJPEG videos by reversibly recompressing their JPEG frames with JPEG XL. Its native CLI stores independent JXL frames in AVI, Matroska (MKV) or MOV with the experimental `MJXL` FourCC. By default, each container also contains the information needed to restore the complete original file byte for byte. AVI/MKV default to lossless FLAC audio; MOV defaults to ALAC; `--copy-audio` copies it unchanged.
 
 ## Why preserve MJPEG this way?
 
@@ -61,7 +61,7 @@ FLAC storage supports 8/16/24-bit PCM; 32-bit PCM remains PCM. Input audio must 
 
 After successful encoding and verification, a summary separates audio, video, recovery payload, and pure container bytes. Headers, indexes, padding and recovery wrappers belong to the container row; the recovery row counts only the stored recovery payload and has an original baseline of zero. The four rows sum to the complete file on both sides. Negative reduction means growth; a zero-byte baseline is shown as `n/a`.
 
-`encode` selects the container from `.avi` or `.mkv` (case-insensitive) and rejects other output extensions. MKV uses FFmpeg's Matroska muxer and `V_MS/VFW/FOURCC` with `MJXL`; original-file recovery is stored in the `mjxl-original.bin` attachment with MIME type `application/x-mjxl-original`. FLAC tracks retain the original PCM depth in `MJXL_ORIGINAL_BITS` metadata. `verify`, `restore-original`, and `bench` accept either container; `restore` always writes MJPEG AVI and requires `.avi`. The compressed media payloads are the same for the same input and effort, but container overhead differs. In the four tested samples, MKV was 970–21,638 bytes larger than AVI; smaller overhead is not guaranteed.
+`encode` selects the container from `.avi`, `.mkv` or `.mov` (case-insensitive) and rejects other output extensions. MKV uses FFmpeg's Matroska muxer and `V_MS/VFW/FOURCC` with `MJXL`; original-file recovery is stored in the `mjxl-original.bin` attachment with MIME type `application/x-mjxl-original`. FLAC tracks retain the original PCM depth in `MJXL_ORIGINAL_BITS` metadata. `verify`, `restore-original`, and `bench` accept all three containers; `restore` always writes MJPEG AVI and requires `.avi`. The compressed media payloads are the same for the same input and effort, but container overhead differs. In the four tested samples, MKV was 970–21,638 bytes larger than AVI; smaller overhead is not guaranteed.
 
 MKV encoding, complete original-file restoration, and FFmpeg video/audio decoding passed for four MOV samples in both audio modes. The user confirmed PotPlayer playback and seeking for the 4.2-second PCM and FLAC MKVs. Explorer thumbnails did not appear for those MKVs; the Preview pane was not tested. No thumbnail handler is installed by this change. To repeat the CLI round-trip suite for MKV, add `--container mkv` to `native/validate_cli.py` and use a fresh output directory. The current MKV implementation has been tested on Windows; it has not yet been rebuilt and tested on Linux.
 
@@ -79,10 +79,12 @@ The user's earlier PotPlayer codec-selection problem was resolved by clearing th
 
 ## Linux CLI and FFmpeg
 
-The CLI uses a C++20 compiler and system FFmpeg, libjxl, and Brotli libraries. Ubuntu 24.04 WSL2 x86-64 with GCC 13 was verified. DirectShow and MFT are Windows-only components.
+The CLI uses a C++20 compiler and system FFmpeg, libjxl, libFLAC and Brotli libraries plus pinned Apple ALAC sources. An earlier PCM/FLAC version was verified on Ubuntu 24.04 WSL2 x86-64 with GCC 13; the ALAC/MOV revision has not yet been revalidated on Linux. DirectShow and MFT are Windows-only components.
 
 ```bash
 sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg
+git clone https://github.com/macosforge/alac.git _deps/alac
+git -C _deps/alac checkout --detach c38887c5c5e64a4b31108733bd79ca9b2496d987
 make -C native -j4
 mkdir -p results
 ./dist/linux/mjxl encode input.mov results/output.avi
@@ -118,7 +120,7 @@ Sources and build definitions belong in Git. Samples, results, `_deps`, `_build`
 Public header comments use English Doxygen; C/C++ implementation comments use Korean. Script messages and default documents use English. Korean document companions use `.ko.md`. Exact stored PCM does not guarantee artifact-free player output: PotPlayer clicked periodically on PCM AVIs written with an 18-byte `strf`. The writer now uses a 16-byte `strf`; AVIs encoded earlier keep the old header until they are re-encoded.
 
 
-The first portability increment uses libFLAC 1.5.0 for audio and PicoSHA2 for archive hashes; the CLI still requires FFmpeg for container input and MKV output. `--audio-codec auto|flac|copy` selects the current audio path; `--copy-audio` remains an alias for copy. Explicit unsupported formats and conflicting options fail. The parser recognizes `alac`, but the backend is not implemented and rejects it without creating an output. MOV output remains unavailable.
+The first portability increment uses libFLAC 1.5.0 for audio and PicoSHA2 for archive hashes; the CLI still requires FFmpeg for container input and MKV output. `--audio-codec auto|flac|alac|copy` selects the current audio path; `--copy-audio` remains an alias for copy. Explicit unsupported formats and conflicting options fail. ALAC encoding/decoding is implemented using the pinned Apple source. Native MOV output defaults to ALAC; MKV accepts explicit ALAC; AVI ALAC requires the private experimental switch described below.
 
 Portable library checks can be built without the FFmpeg SDK:
 
@@ -129,3 +131,16 @@ ctest --test-dir _build/portable-codecs -C Release --output-on-failure
 ```
 
 Windows uses dependencies prepared by `native/prepare_deps.ps1`. The system-library CMake path requires libjxl, Brotli and libFLAC development packages; building the transitional CLI additionally requires FFmpeg development libraries.
+
+
+## ALAC and native MOV
+
+MOV uses the native writer with ALAC by default; --copy-audio selects PCM. MKV supports explicit ALAC but retains its FLAC default. AVI ALAC is a private experiment requiring both flags below; FFmpeg does not automatically identify this AVI audio, so do not assume Windows player support.
+
+```powershell
+& $mjxl encode input.mov output.mov
+& $mjxl encode input.mov output.mkv --audio-codec alac
+& $mjxl encode input.mov experimental.avi --audio-codec alac --experimental-avi-alac
+```
+
+All three retain original-file recovery. Unsupported explicit codecs/layouts fail; MOV auto copies PCM when its layout is outside the ALAC profile. ALAC can be larger than FLAC or PCM, particularly in the checked PCM8 camera samples. See the [measured comparison](doc/AUDIO-CONTAINERS.md) and [MOV/ALAC file profile](doc/MOV-ALAC-PROFILE.md). QuickTime Player/macOS playback and thumbnails remain unvalidated, even though the ALAC audio and MOV structure pass the Windows FFmpeg checks. prepare_deps.ps1 now prepares pinned Apple ALAC sources; current Linux/macOS builds also require those sources and CMake 3.28+.

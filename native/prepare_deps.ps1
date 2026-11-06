@@ -29,4 +29,14 @@ if (-not (Test-Path -LiteralPath $flac)) {
 $flacCommit = & git -C $flac rev-parse HEAD
 if ($flacCommit -ne '1507800de4b70e21be71f38caa0d9079d0bc6e45') { throw 'Unexpected libFLAC version. Existing dependencies were not modified.' }
 
+
+$alac = Join-Path $dependencyRoot 'alac'
+if (-not (Test-Path -LiteralPath $alac)) {
+    & git clone https://github.com/macosforge/alac.git $alac
+    if ($LASTEXITCODE) { throw 'Failed to download ALAC.' }
+    & git -C $alac checkout --detach c38887c5c5e64a4b31108733bd79ca9b2496d987
+    if ($LASTEXITCODE) { throw 'Failed to select the pinned ALAC revision.' }
+}
+if ((& git -C $alac rev-parse HEAD) -ne 'c38887c5c5e64a4b31108733bd79ca9b2496d987') { throw 'Unexpected ALAC version.' }
+
 Write-Output 'Dependency preparation completed.'

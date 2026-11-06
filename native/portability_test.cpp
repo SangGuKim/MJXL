@@ -1,4 +1,5 @@
 #include "audio_policy.hpp"
+#include "alac_audio.hpp"
 #include "cli.hpp"
 #include "original_file.hpp"
 #include "third_party/picosha2/picosha2.h"
@@ -31,6 +32,9 @@ void check_policy()
 {
     using namespace mjxl;
     const PcmFormat pcm{16, 2, 44100};
+    require(select_audio(Container::Mov, AudioCodec::Auto, {16, 4, 44100, 0x33}).codec == AudioCodec::Copy,
+            "Unsupported ALAC speaker layout did not fall back to PCM");
+    rejects([]() { select_audio(Container::Mov, AudioCodec::Alac, {16, 4, 44100, 0x33}); });
     require(select_audio(Container::Mov, AudioCodec::Auto, pcm).codec == AudioCodec::Alac, "MOV policy differs");
     for (const auto container : {Container::Avi, Container::Matroska}) {
         require(select_audio(container, AudioCodec::Auto, pcm).codec == AudioCodec::Flac, "FLAC default differs");
@@ -60,6 +64,39 @@ void check_hash_and_archive()
     const auto payload = mjxl::pack_original(original, {{true, 2, 3}, {false, 7, 2}});
     require(mjxl::rebuild_original(payload, {{2, 3, 4}}, std::array<uint8_t, 2>{7, 8}) == original, "Archive round trip differs");
     rejects([&]() { mjxl::rebuild_original(payload, {{2, 3, 5}}, std::array<uint8_t, 2>{7, 8}); });
+}
+
+void check_alac()
+{
+    unsigned cases = 0;
+    for (const unsigned depth : {8u, 16u, 24u, 32u}) {
+        for (const unsigned channels : {1u, 2u, 3u, 6u, 8u}) {
+            for (const unsigned count : {1u, 5003u}) {
+                const mjxl::PcmFormat format{depth, channels, 44100};
+                std::vector<uint8_t> pcm(size_t(count) * channels * depth / 8);
+                uint32_t random = 1234567;
+                for (auto& byte : pcm) {
+                    random = random * 1664525u + 1013904223u;
+                    byte = static_cast<uint8_t>(random >> 24);
+                }
+                const auto encoded = mjxl::alac_encode(pcm, format);
+                mjxl::AlacDecoder decoder(encoded.streamInfo, format);
+                std::vector<uint8_t> decoded;
+                for (const auto& packet : encoded.packets) {
+                    const auto part = decoder.decode(packet.bytes);
+                    decoded.insert(decoded.end(), part.begin(), part.end());
+                }
+                require(decoded == pcm, "ALAC round trip differs");
+                const auto& packet = encoded.packets.front().bytes;
+                rejects([&]() { decoder.decode(std::span<const uint8_t>(packet).first(packet.size() / 2)); });
+                auto badConfig = encoded.streamInfo;
+                badConfig[0] = 0xff;
+                rejects([&]() { mjxl::AlacDecoder invalid(badConfig, format); });
+                ++cases;
+            }
+        }
+    }
+    std::cout << "Passed " << cases << " ALAC depth/channel/length cases\n";
 }
 
 void check_flac()
@@ -105,6 +142,7 @@ int main()
         check_policy();
         check_hash_and_archive();
         check_flac();
+        check_alac();
         std::cout << "Passed policy, CLI, SHA-256 and archive checks without FFmpeg\n";
         return 0;
     } catch (const std::exception& error) {

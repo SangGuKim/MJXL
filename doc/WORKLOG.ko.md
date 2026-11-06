@@ -174,3 +174,38 @@ Windows x64 / VS2026 v145 검증 결과는 다음과 같다.
 - 새 출력 28개는 독립 FFmpeg 디코딩에서 원본과 정규화 PCM이 일치했고 영상 디코딩도 통과했다. AVI/MKV의 영상·음성 payload 14쌍은 각각 동일했다. 미구현·잘못된·상충 codec 옵션은 출력 파일 생성 없이 거부했다. 요약은 results/portability-crosscheck.json에 있다.
 
 libFLAC 버전은 1507800de4b70e21be71f38caa0d9079d0bc6e45로 고정하고 FLAC·PicoSHA2 라이선스를 배포 폴더에 복사한다. libFLAC 1.5.0의 win_utf8_io.c에 빠진 할당 함수 선언은 MSVC 타깃의 stdlib.h 강제 include로 보완하며 다운로드한 소스는 변경하지 않는다. 커밋과 push는 수행하지 않았다.
+
+## 2026-11-06: ALAC·자체 MOV·컨테이너 비교
+
+이 구현 전에 기존 작업을 5238327로 커밋하고 push했다. 요청한 작성자·커미터 이메일은 peepru@outlook.com이다. 최초 push는 회사 SSH 계정 권한으로 실패했으며 저장소 전용 core.sshCommand로 기존 개인 키를 선택해 해결했다. 전역 SSH 설정은 유지했다. 아래 ALAC 작업은 그 뒤의 미커밋 변경이다.
+
+Apple ALAC c38887c5c5e64a4b31108733bd79ca9b2496d987 기반 독립 인코딩·디코딩을 구현했다. PCM8은 진폭을 유지하는 PCM16으로 가역 승격하고 PCM16/24/32 및 지원 채널 배치는 순열을 적용해 정확히 복원한다. 알려진 미지원 배치는 명시적 ALAC 요청을 거부하며 MOV auto에서는 PCM으로 둔다. 생성한 참조 코드 복사본에 입력·프레임 경계와 predictor 0비트 shift 보완을 적용하고 다운로드 원본은 수정하지 않았다. libFLAC은 AVI/MKV 기본값 및 기존 파일 읽기에 유지한다.
+
+자체 MOV writer에 독립 MJXL·ALAC/PCM, 정확한 유리수 시간, co64, moov/udta의 MJXO/MJXA 원본 복원 atom을 연결했다. MKV는 기존 FFmpeg writer로 명시적 ALAC을 지원한다. AVI ALAC은 private WAVE tag 0xA1AC 및 --audio-codec alac --experimental-avi-alac 조합으로만 허용한다. 자체 복원은 통과했지만 외부 FFmpeg는 -c:a alac을 강제해야 한다. AVI Splitter·팟플레이어 지원으로 해석하지 않는다. CLI의 미디어 읽기와 MKV 쓰기는 아직 FFmpeg가 필요하다.
+
+Windows Release 빌드와 독립 CTest를 통과했다. FLAC 54조합, ALAC 40조합 및 구성·잘림·정책을 검사했다. results/alac-v2-camera는 실제 입력 7개의 56개 코덱·컨테이너 조합을 포함한다. 최종 results/alac-v4-synthetic은 PCM16/24/32 스테레오와 5.1채널의 성공 조합 30개이며 PCM32 FLAC 명시적 거부 2건은 예상한 동작이다. 원본 전체 물리 복원, 외부 정규화 PCM과 영상 디코딩, 컨테이너 간 media digest, ALAC에서 MJPEG AVI 복원을 검사했다. 이전 results/alac-v2-synthetic은 예상된 PCM32 FLAC 거부에서 멈춘 불완전 검사이며 최종 보고서가 아니다.
+
+results/alac-v5-edges에서 96 kHz ALAC, quad의 auto PCM 전환·명시적 거부, 영상 전용 AVI/MKV/MOV, seek, --no-original 정책, 잘못된 atom 크기와 중복 복원 atom 거부를 통과했다. 이전 results/alac-v4-edges 시도는 진단용 FFmpeg duration 인수 오류로 인코딩 전 중단됐으므로 검증 결과로 사용하지 않는다. 진단 파일은 삭제하지 않았다.
+
+실제 PCM8 입력 7개의 원본 오디오는 합계 556,392바이트이다. FLAC은 374,249바이트로 32.74% 줄었고 ALAC은 939,327바이트로 원본보다 68.82%, FLAC보다 150.99% 컸다. 같은 MKV 전체 파일 합계는 FLAC 54,399,041바이트, ALAC 54,962,913바이트로 ALAC이 1.04% 컸다. 따라서 AVI/MKV의 FLAC 기본값을 유지한다. MOV는 Apple 경로를 위한 ALAC 기본값을 유지하되 이 입력에서는 --copy-audio가 더 작다. 상세 결과와 형식은 AUDIO-CONTAINERS 및 MOV-ALAC-PROFILE의 영문·한국어 문서에 기록했다.
+
+dist/Release에 새 CLI를 빌드하고 ALAC 라이선스도 복사했다. Linux Makefile은 공통 CMake를 호출하도록 연결했으나 이번 ALAC/MOV 코드는 Linux/macOS에서 빌드하지 않았다. 설치·등록, QuickTime/팟플레이어 실재생, GStreamer·Finder 검증은 하지 않았다. 5238327 이후 추가 커밋·push는 하지 않았다.
+
+
+## 2026-11-06: MOV 재생 경로 후속 확인
+
+사용자 요청에 따라 진단에는 W:/proj/mjxl/samples에서 만든 W: 출력만 사용했다. K: 드라이브에 직접 접근하지 않는다. 팟플레이어의 기존 재생목록을 이용하는 방식은 중단하고 W: 파일 경로를 명시해 실행했다.
+
+팟플레이어의 재생 정보에서 MOV의 ALAC은 Built-in Audio Codec/Transform으로 연결되고 영상은 코덱 없음으로 남는 것을 확인했다. 파일 정보에는 MJXL 영상 트랙이 표시되지만 실제 필터 목록은 Built-in MP4 Source, 오디오 디코더, WASAPI renderer뿐이었다. FFmpeg로 다시 포장한 진단 MOV도 ALAC/PCM 모두 영상이 연결되지 않았다. 따라서 오디오 압축 문제와 MOV 영상 연결 문제를 구분한다. AVI/MKV+FLAC 재생은 사용자 확인으로 정상이며 AVI의 자동 DirectShow 재생·seek 대조 검사도 통과했다.
+
+MOV FourCC byte order alias를 임시 등록하는 가설은 효과가 없었다. 소스 변경을 제거하고 설치된 디코더를 백업 파일과 SHA-256이 같은 원래 파일로 복원·재등록했으며 설치 파일 목록도 복구했다. 진단 remux 파일은 원본 복원 데이터를 생략한 미디어 전용 파일이며 보존 출력으로 사용하지 않는다.
+
+ffplay는 다음 명령으로 W:의 MJXL MOV+ALAC을 실행했고 사용자가 실제 재생을 확인했다. 종료 코드는 0이었다. MJXL 태그의 자동 codec 탐색 경고가 있더라도 libjxl을 명시해 재생한다. 이 경로는 MFT를 사용하지 않는다.
+
+```powershell
+& C:/sdk/ffmpeg/bin/ffplay.exe -vcodec libjxl W:/proj/mjxl/results/alac-v2-camera/mov/alac/IMG_20060430_203434.mov
+```
+
+사용자는 MJPEG MOV와 MJXL AVI의 탐색기 썸네일은 표시되지만 MJXL MOV는 표시되지 않는다고 보고했다. 팟플레이어와 썸네일이 동일한 구성요소 때문에 실패하는지는 확인하지 않았다. 현재 MFT는 설치되지 않았으며 DirectShow 디코더만으로 MOV 썸네일이 지원된다고 간주하지 않는다. macOS의 MediaExtension 영상 전달·필요 시 Format Reader, QuickTime 재생·Finder 썸네일은 향후 별도 검증 대상이다.
+
+ALAC이 PCM 원본보다 커지는 경우에는 auto가 압축 결과와 PCM 크기를 비교해 PCM으로 전환하는 정책을 논의했다. 아직 구현하지 않았으며 현재 MOV auto는 형식·배치 지원 여부만으로 ALAC/PCM을 선택한다. 명시적 ALAC 요청을 보존하는 방향이다.

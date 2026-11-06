@@ -19,6 +19,7 @@ extern "C" {
 namespace fs = std::filesystem;
 namespace mjxl {
 constexpr uint16_t kFlacFormatTag = 0xF1AC;
+constexpr uint16_t kExperimentalAlacFormatTag = 0xA1AC;
 constexpr uint32_t kAudioMetadataVersion = 1;
 constexpr auto kOriginalAttachment = "mjxl-original.bin";
 constexpr auto kOriginalMime = "application/x-mjxl-original";
@@ -51,10 +52,15 @@ static std::string utf8(const fs::path& path)
 // hdrl 내부 mjxa에서 원본 PCM 비트 깊이를 읽는다.
 static unsigned read_original_bits(const fs::path& path)
 {
+    if (const auto metadata = read_mov_metadata(path, "MJXA")) {
+        check(metadata->size() == 8 && (*metadata)[0] == 0 && (*metadata)[1] == 0 && (*metadata)[2] == 0 && (*metadata)[3] == 1 &&
+              (*metadata)[4] == 0 && (*metadata)[5] == 0 && (*metadata)[6] == 0, "Invalid MOV audio metadata");
+        return (*metadata)[7];
+    }
     std::ifstream file(path, std::ios::binary);
     char header[12]{};
     file.read(header, sizeof(header));
-    check(file && std::memcmp(header, "RIFF", 4) == 0 && std::memcmp(header + 8, "AVI ", 4) == 0, "FLAC audio is only supported in AVI");
+    check(file && std::memcmp(header, "RIFF", 4) == 0 && std::memcmp(header + 8, "AVI ", 4) == 0, "Compressed audio requires MJXL original-depth metadata");
     const auto next = [&](char* tag, uint32_t& size) {
         file.read(tag, 4);
         file.read(reinterpret_cast<char*>(&size), sizeof(size));
@@ -84,7 +90,7 @@ static unsigned read_original_bits(const fs::path& path)
             file.seekg(std::streamoff(size) + (size & 1), std::ios::cur);
         }
     }
-    throw std::runtime_error("FLAC audio without MJXL metadata is unsupported");
+    throw std::runtime_error("Compressed audio without MJXL metadata is unsupported");
 }
 
 Movie read_movie(const fs::path& path)
@@ -114,19 +120,27 @@ Movie read_movie(const fs::path& path)
             audio = static_cast<int>(i);
             movie.sampleRate = info->sample_rate;
             movie.channels = info->ch_layout.nb_channels;
-            if (info->codec_id == AV_CODEC_ID_FLAC) {
-                movie.flac = true;
+            movie.channelMask = info->ch_layout.order == AV_CHANNEL_ORDER_NATIVE ? info->ch_layout.u.mask : 0;
+            if (info->codec_id == AV_CODEC_ID_FLAC || info->codec_id == AV_CODEC_ID_ALAC || info->codec_tag == kExperimentalAlacFormatTag) {
+                movie.alac = info->codec_id == AV_CODEC_ID_ALAC || info->codec_tag == kExperimentalAlacFormatTag;
+                movie.flac = !movie.alac;
                 const auto bits = av_dict_get(stream->metadata, "MJXL_ORIGINAL_BITS", nullptr, 0);
                 if (bits) {
                     const std::string value(bits->value);
-                    check(value == "8" || value == "16" || value == "24", "Invalid MJXL audio metadata");
+                    check(value == "8" || value == "16" || value == "24" || (movie.alac && value == "32"), "Invalid MJXL audio metadata");
                     movie.bits = static_cast<unsigned>(std::stoi(value));
                 } else {
                     movie.bits = read_original_bits(path);
                 }
-                check(info->extradata && info->extradata_size == 34, "FLAC audio has no STREAMINFO");
-                movie.streamInfo.assign(info->extradata, info->extradata + info->extradata_size);
-                check(mjxl::flac_supported({movie.bits, movie.channels, movie.sampleRate}), "Invalid MJXL audio metadata");
+                if (movie.alac) {
+                    check(info->extradata && info->extradata_size == 36 && std::memcmp(info->extradata + 4, "alac", 4) == 0,
+                          "ALAC audio has no configuration atom");
+                    movie.streamInfo.assign(info->extradata + 12, info->extradata + 36);
+                } else {
+                    check(info->extradata && info->extradata_size == 34, "FLAC audio has no STREAMINFO");
+                    movie.streamInfo.assign(info->extradata, info->extradata + info->extradata_size);
+                    check(mjxl::flac_supported({movie.bits, movie.channels, movie.sampleRate}), "Invalid MJXL audio metadata");
+                }
             } else {
                 check(info->codec_id == AV_CODEC_ID_PCM_U8 || info->codec_id == AV_CODEC_ID_PCM_S16LE || info->codec_id == AV_CODEC_ID_PCM_S24LE || info->codec_id == AV_CODEC_ID_PCM_S32LE, "Audio must be FLAC, unsigned PCM8 or signed little-endian PCM16/24/32");
                 movie.bits = av_get_bits_per_sample(info->codec_id);
@@ -170,6 +184,17 @@ Movie read_movie(const fs::path& path)
     return movie;
 }
 
+static std::vector<uint8_t> codec_configuration(const EncodedAudio& audio)
+{
+    if (audio.encoding == AudioEncoding::Flac) {
+        return audio.streamInfo;
+    }
+    check(audio.streamInfo.size() == 24, "Invalid ALAC configuration");
+    std::vector<uint8_t> atom{0, 0, 0, 36, 'a', 'l', 'a', 'c', 0, 0, 0, 0};
+    atom.insert(atom.end(), audio.streamInfo.begin(), audio.streamInfo.end());
+    return atom;
+}
+
 class AviWriter final : public ContainerWriter {
     std::fstream file_;
     uint64_t movi_ = 0, frameCountPos_ = 0, videoLengthPos_ = 0, audioLengthPos_ = 0;
@@ -179,7 +204,7 @@ class AviWriter final : public ContainerWriter {
     std::vector<Entry> index_;
 
     // FLAC 프레임을 가변 크기 청크로 선언하고 원본 비트 깊이는 별도로 보존한다.
-    void write_flac_header(const Movie& movie, const mjxl::FlacStream& flac)
+    void write_compressed_header(const Movie& movie, const mjxl::FlacStream& flac)
     {
         uint64_t total = 0;
         uint32_t largest = 0;
@@ -195,13 +220,14 @@ class AviWriter final : public ContainerWriter {
         audioLengthPos_ = position(); u32(0);
         u32(largest); u32(0xffffffff); u32(0);
         for (int i = 0; i < 4; ++i) { u16(0); }
-        tag("strf"); u32(static_cast<uint32_t>(18 + flac.streamInfo.size()));
-        u16(kFlacFormatTag); u16(static_cast<uint16_t>(movie.channels));
+        const auto configuration = codec_configuration(flac);
+        tag("strf"); u32(static_cast<uint32_t>(18 + configuration.size()));
+        u16(flac.encoding == AudioEncoding::Alac ? kExperimentalAlacFormatTag : kFlacFormatTag); u16(static_cast<uint16_t>(movie.channels));
         u32(movie.sampleRate); u32(static_cast<uint32_t>(total * movie.sampleRate / samples));
         // AVI Splitter가 청크 길이를 계산하도록 VBR 규칙의 프레임당 샘플 수를 기록한다.
         u16(static_cast<uint16_t>(flac.frameSamples)); u16(static_cast<uint16_t>(flac.storedBits));
-        u16(static_cast<uint16_t>(flac.streamInfo.size()));
-        bytes(flac.streamInfo.data(), flac.streamInfo.size());
+        u16(static_cast<uint16_t>(configuration.size()));
+        bytes(configuration.data(), configuration.size());
         finish_list(stream);
         tag("mjxa"); u32(8); u32(kAudioMetadataVersion); u32(movie.bits);
     }
@@ -231,7 +257,7 @@ public:
         finish_list(stream);
         if (flac) {
             flac_ = true;
-            write_flac_header(movie, *flac);
+            write_compressed_header(movie, *flac);
         } else if (movie.channels) {
             blockAlign_ = movie.channels * movie.bits / 8;
             stream = list("strl");
@@ -328,6 +354,12 @@ std::vector<uint8_t> read_original_chunk(const fs::path& path)
     file.read(header, sizeof(header));
     check(bool(file), "Cannot read container header");
     if (std::memcmp(header, "RIFF", 4) != 0) {
+        if (const auto metadata = read_mov_metadata(path, "MJXO")) {
+            return *metadata;
+        }
+        if (std::memcmp(header + 4, "ftyp", 4) == 0) {
+            return {};
+        }
         AVFormatContext* raw = nullptr;
         check(avformat_open_input(&raw, utf8(path).c_str(), nullptr, nullptr) >= 0, "Cannot open recovery container");
         auto closer = [](AVFormatContext* ptr) { avformat_close_input(&ptr); };
@@ -437,13 +469,17 @@ public:
             auto audio = audio_->codecpar;
             audio->codec_type = AVMEDIA_TYPE_AUDIO;
             audio->sample_rate = sampleRate_;
-            av_channel_layout_default(&audio->ch_layout, movie.channels);
+            if (movie.channelMask) {
+                check_av(av_channel_layout_from_mask(&audio->ch_layout, movie.channelMask), "Set audio speaker layout");
+            } else {
+                av_channel_layout_default(&audio->ch_layout, movie.channels);
+            }
             audio->bits_per_coded_sample = flac ? flac->storedBits : movie.bits;
             audio->bits_per_raw_sample = audio->bits_per_coded_sample;
             if (flac) {
-                audio->codec_id = AV_CODEC_ID_FLAC;
+                audio->codec_id = flac->encoding == AudioEncoding::Alac ? AV_CODEC_ID_ALAC : AV_CODEC_ID_FLAC;
                 frameSamples_ = flac->frameSamples;
-                extradata(audio, flac->streamInfo);
+                extradata(audio, codec_configuration(*flac));
                 check_av(av_dict_set(&audio_->metadata, "MJXL_ORIGINAL_BITS", std::to_string(movie.bits).c_str(), 0), "Set original PCM depth");
             } else {
                 switch (movie.bits) {

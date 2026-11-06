@@ -5,7 +5,7 @@
 
 namespace mjxl {
 namespace {
-enum class Option { AudioCodec, CopyAudio, NoOriginal, Effort, Help };
+enum class Option { ExperimentalAviAlac, AudioCodec, CopyAudio, NoOriginal, Effort, Help };
 
 struct OptionSpec {
     Option id;
@@ -25,7 +25,8 @@ struct CommandSpec {
 
 // 파싱과 도움말이 일치하도록 명령과 옵션을 공통 표에 정의한다.
 const std::vector<OptionSpec> kOptions = {
-    {Option::AudioCodec, "", "--audio-codec", "--audio-codec <codec>", "Audio codec: auto, flac, alac or copy (ALAC backend not yet available)"},
+    {Option::ExperimentalAviAlac, "", "--experimental-avi-alac", "--experimental-avi-alac", "Allow private AVI ALAC mapping (requires --audio-codec alac)"},
+    {Option::AudioCodec, "", "--audio-codec", "--audio-codec <codec>", "Audio codec: auto, flac, alac or copy (MOV defaults to ALAC)"},
     {Option::CopyAudio, "", "--copy-audio", "--copy-audio", "Copy the source audio unchanged instead of storing it as lossless FLAC"},
     {Option::NoOriginal, "", "--no-original", "--no-original", "Do not require data to restore the original file"},
     {Option::Effort, "-e", "--effort", "-e, --effort <1-10>", "JPEG XL encoder effort (default: 7)"},
@@ -33,8 +34,8 @@ const std::vector<OptionSpec> kOptions = {
 };
 
 const std::vector<CommandSpec> kCommands = {
-    {"encode", "<input> <output.avi|output.mkv>", 2, "Compress an MJPEG video into MJXL AVI or MKV (selected by extension) and verify it", {Option::AudioCodec, Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
-    {"verify", "<original> <encoded>", 2, "Compare an MJXL AVI or MKV with its original file", {Option::NoOriginal, Option::Help}},
+    {"encode", "<input> <output.avi|output.mkv|output.mov>", 2, "Compress an MJPEG video into MJXL AVI, MKV or MOV (selected by extension) and verify it", {Option::ExperimentalAviAlac, Option::AudioCodec, Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
+    {"verify", "<original> <encoded>", 2, "Compare an MJXL AVI, MKV or MOV with its original file", {Option::NoOriginal, Option::Help}},
     {"restore-original", "<encoded> <output>", 2, "Rebuild the original file byte for byte", {Option::Help}},
     {"restore", "<encoded> <output.avi>", 2, "Write the original JPEG frames and PCM as an MJPEG AVI", {Option::Help}},
     {"bench", "<encoded>", 1, "Measure JXL decoding speed", {Option::Help}},
@@ -134,6 +135,8 @@ CommandLine parse_command_line(const std::vector<std::string>& arguments)
         }
         if (*found == Option::Help) {
             result.help = true;
+        } else if (*found == Option::ExperimentalAviAlac) {
+            result.experimentalAviAlac = true;
         } else if (*found == Option::CopyAudio) {
             if (audioSelected && result.audioCodec != AudioCodec::Copy) {
                 throw UsageError("Conflicting audio codec options");

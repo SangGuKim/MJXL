@@ -142,3 +142,16 @@ ffplay에는 `-vcodec libjxl`을 쓰고 FFmpeg에는 `-i` 앞에 `-c:v libjxl`�
 `register_mft.ps1`은 관리자 승인 후 MFT를 Program Files에 복사하고 데스크톱용으로 등록한다. `-Unregister`는 등록을 해제한다. 이 등록만으로 Windows Media Player에서 재생되지는 않았다. Media Player 지원은 미완료이며 현재 권장 재생 경로는 DirectShow이다. Windows Media Foundation의 AVI 소스는 AVI 안의 FLAC을 읽을 때 멈추므로, 이 경로를 시험할 때는 `--copy-audio`로 만든 AVI를 사용한다.
 
 `package_mft.ps1`은 Windows SDK로 미디어 확장 MSIX를 생성한다. `-Sign`은 현재 사용자 My 저장소에 30일짜리 개발용 코드 서명 인증서를 만들거나 재사용한다. 신뢰 저장소 등록이나 패키지 설치는 수행하지 않는다. 개발 패키지는 Media Player에서 설치·재생 검증하지 않았으며 배포용 설치 프로그램으로 간주하지 않는다. 인증서·개인 키·서명 패키지는 Git에 포함하지 않는다.
+
+
+## ALAC과 자체 MOV 출력
+
+MOV는 자체 writer와 ALAC을 기본으로 사용하며 --copy-audio로 PCM을 선택한다. MKV는 명시적 ALAC을 지원하되 기본 FLAC을 유지한다. AVI ALAC은 아래 두 옵션을 모두 요구하는 private 실험이다. FFmpeg가 AVI의 오디오를 자동 식별하지 못하므로 Windows 플레이어 호환성을 전제하지 않는다.
+
+```powershell
+& $mjxl encode input.mov output.mov
+& $mjxl encode input.mov output.mkv --audio-codec alac
+& $mjxl encode input.mov experimental.avi --audio-codec alac --experimental-avi-alac
+```
+
+세 컨테이너 모두 원본 전체 복원 정보를 유지한다. 명시한 코덱·채널 배치가 미지원이면 오류로 처리하고 MOV auto는 ALAC 프로필 밖의 PCM을 그대로 복사한다. 검사한 PCM8 카메라 자료처럼 ALAC이 FLAC이나 PCM보다 클 수 있다. [실측 비교](../doc/AUDIO-CONTAINERS.ko.md)와 [MOV·ALAC 프로필](../doc/MOV-ALAC-PROFILE.ko.md)을 참고한다. Windows FFmpeg 검증과 별개로 QuickTime Player·macOS 재생과 썸네일은 아직 검증하지 않았다. prepare_deps.ps1은 버전을 고정한 Apple ALAC 소스도 준비한다. 현재 Linux/macOS 빌드에도 해당 소스와 CMake 3.28 이상이 필요하다.

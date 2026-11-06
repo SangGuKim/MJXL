@@ -1,6 +1,7 @@
 #include "cli.hpp"
 #include "core.hpp"
 #include "flac_audio.hpp"
+#include "alac_audio.hpp"
 #include "original_file.hpp"
 #ifdef _WIN32
 #include <windows.h>
@@ -49,12 +50,16 @@ static std::vector<uint8_t> pcm_of(const Movie& movie)
 {
     std::vector<uint8_t> pcm;
     std::unique_ptr<mjxl::FlacDecoder> decoder;
+    std::unique_ptr<mjxl::AlacDecoder> alacDecoder;
     if (movie.flac) {
-        decoder = std::make_unique<mjxl::FlacDecoder>(movie.streamInfo, mjxl::PcmFormat{movie.bits, movie.channels, movie.sampleRate});
+        decoder = std::make_unique<mjxl::FlacDecoder>(movie.streamInfo, mjxl::PcmFormat{movie.bits, movie.channels, movie.sampleRate, movie.channelMask});
+    }
+    if (movie.alac) {
+        alacDecoder = std::make_unique<mjxl::AlacDecoder>(movie.streamInfo, mjxl::PcmFormat{movie.bits, movie.channels, movie.sampleRate, movie.channelMask});
     }
     for (const auto& p : movie.packets) {
         if (!p.video) {
-            const auto bytes = decoder ? decoder->decode(p.bytes) : p.bytes;
+            const auto bytes = decoder ? decoder->decode(p.bytes) : alacDecoder ? alacDecoder->decode(p.bytes) : p.bytes;
             pcm.insert(pcm.end(), bytes.begin(), bytes.end());
         }
     }
@@ -170,31 +175,48 @@ static int run(const std::vector<std::string>& arguments)
             check(!fs::exists(output), "Output already exists");
             auto extension = output.extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-            check(extension == ".avi" || extension == ".mkv", "Output extension must be .avi or .mkv");
+            check(extension == ".avi" || extension == ".mkv" || extension == ".mov", "Output extension must be .avi, .mkv or .mov");
             const bool matroska = extension == ".mkv";
+            const bool mov = extension == ".mov";
             auto partial = output; partial += ".partial";
-            const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate};
+            const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate, movie.channelMask};
             const auto pcm = pcm_of(movie);
-            std::optional<mjxl::FlacStream> flac;
+            std::optional<mjxl::EncodedAudio> compressed;
             const auto selection = movie.channels ? mjxl::select_audio(
-                matroska ? mjxl::Container::Matroska : mjxl::Container::Avi, cli.audioCodec, format) :
+                mov ? mjxl::Container::Mov : matroska ? mjxl::Container::Matroska : mjxl::Container::Avi, cli.audioCodec, format) :
                 mjxl::AudioSelection{mjxl::AudioCodec::Copy, "No audio track"};
-            check(selection.codec != mjxl::AudioCodec::Alac, "ALAC is planned but is not implemented in this build");
+            check(!cli.experimentalAviAlac || (extension == ".avi" && selection.codec == mjxl::AudioCodec::Alac),
+                  "--experimental-avi-alac requires AVI output and --audio-codec alac");
+            check(extension != ".avi" || selection.codec != mjxl::AudioCodec::Alac || cli.experimentalAviAlac,
+                  "AVI ALAC requires --experimental-avi-alac; use FLAC or copy for compatibility");
+            check(!mov || selection.codec != mjxl::AudioCodec::Flac, "MOV supports ALAC or copy; use MKV/AVI for FLAC");
             std::cout << "Audio policy: " << (movie.channels ? mjxl::audio_codec_name(selection.codec) : "none")
-                      << " (" << selection.reason << "), backend: native-audio/FFmpeg-container\n";
+                      << " (" << selection.reason << "), audio backend: "
+                      << (selection.codec == mjxl::AudioCodec::Alac ? "Apple ALAC" : selection.codec == mjxl::AudioCodec::Flac ? "libFLAC" : "PCM copy")
+                      << ", container writer: " << (mov ? "native MOV" : matroska ? "FFmpeg MKV" : "native AVI") << '\n';
             if (selection.codec == mjxl::AudioCodec::Flac && !pcm.empty()) {
-                flac = mjxl::flac_encode(pcm, format);
+                compressed = mjxl::flac_encode(pcm, format);
                 // 파일을 쓰기 전에 FLAC에서 원본 PCM으로 정확히 복원되는지 확인한다.
-                mjxl::FlacDecoder decoder(flac->streamInfo, format);
+                mjxl::FlacDecoder decoder(compressed->streamInfo, format);
                 std::vector<uint8_t> restored;
-                for (const auto& packet : flac->packets) {
+                for (const auto& packet : compressed->packets) {
                     const auto bytes = decoder.decode(packet.bytes);
                     restored.insert(restored.end(), bytes.begin(), bytes.end());
                 }
                 const auto rest = decoder.flush();
                 restored.insert(restored.end(), rest.begin(), rest.end());
                 check(restored == pcm, "FLAC round-trip verification failed");
-                std::cout << "Audio FLAC: " << pcm.size() << " PCM bytes stored as " << flac->storedBits << "-bit FLAC\n";
+                std::cout << "Audio FLAC: " << pcm.size() << " PCM bytes stored as " << compressed->storedBits << "-bit FLAC\n";
+            } else if (selection.codec == mjxl::AudioCodec::Alac && !pcm.empty()) {
+                compressed = mjxl::alac_encode(pcm, format);
+                mjxl::AlacDecoder decoder(compressed->streamInfo, format);
+                std::vector<uint8_t> restored;
+                for (const auto& packet : compressed->packets) {
+                    const auto bytes = decoder.decode(packet.bytes);
+                    restored.insert(restored.end(), bytes.begin(), bytes.end());
+                }
+                check(restored == pcm, "ALAC round-trip verification failed");
+                std::cout << "Audio ALAC: " << pcm.size() << " PCM bytes stored as " << compressed->storedBits << "-bit ALAC\n";
             } else if (selection.codec == mjxl::AudioCodec::Copy && !pcm.empty()) {
                 std::cout << "Audio stays PCM: " << pcm.size() << " bytes\n";
             }
@@ -205,10 +227,12 @@ static int run(const std::vector<std::string>& arguments)
             }
             std::unique_ptr<mjxl::ContainerWriter> avi;
             std::unique_ptr<mjxl::ContainerWriter> mkv;
-            if (matroska) {
-                mkv = mjxl::make_matroska_writer(partial, movie, flac ? &*flac : nullptr, originalData);
+            if (mov) {
+                mkv = mjxl::make_mov_writer(partial, movie, compressed ? &*compressed : nullptr, originalData);
+            } else if (matroska) {
+                mkv = mjxl::make_matroska_writer(partial, movie, compressed ? &*compressed : nullptr, originalData);
             } else {
-                avi = mjxl::make_avi_writer(partial, movie, MJXL, flac ? &*flac : nullptr);
+                avi = mjxl::make_avi_writer(partial, movie, MJXL, compressed ? &*compressed : nullptr);
             }
             const auto write_packet = [&](bool video, std::span<const uint8_t> bytes) {
                 if (mkv) {
@@ -223,10 +247,10 @@ static int run(const std::vector<std::string>& arguments)
             size_t nextAudio = 0;
             // 재생 시각이 도래한 FLAC 프레임을 해당 영상 프레임보다 먼저 쓴다.
             const auto write_audio_until = [&](int64_t frame) {
-                while (flac && nextAudio < flac->packets.size() &&
-                       flac->packets[nextAudio].position * movie.fps.num <= frame * movie.fps.den * movie.sampleRate) {
-                    write_packet(false, flac->packets[nextAudio].bytes);
-                    storedAudioBytes += flac->packets[nextAudio].bytes.size();
+                while (compressed && nextAudio < compressed->packets.size() &&
+                       compressed->packets[nextAudio].position * movie.fps.num <= frame * movie.fps.den * movie.sampleRate) {
+                    write_packet(false, compressed->packets[nextAudio].bytes);
+                    storedAudioBytes += compressed->packets[nextAudio].bytes.size();
                     ++nextAudio;
                 }
             };
@@ -242,13 +266,13 @@ static int run(const std::vector<std::string>& arguments)
                     if (frames % 60 == 0) { std::cout << "Encoded " << frames << " frames\n"; }
                 } else {
                     originalAudioBytes += p.bytes.size();
-                    if (!flac) {
+                    if (!compressed) {
                         write_packet(false, p.bytes);
                         storedAudioBytes += p.bytes.size();
                     }
                 }
             }
-            if (flac) {
+            if (compressed) {
                 // 마지막 영상 프레임 뒤에 남은 오디오를 모두 쓴다.
                 write_audio_until(INT64_MAX / (int64_t(movie.fps.den) * movie.sampleRate));
             }
@@ -286,24 +310,30 @@ static int run(const std::vector<std::string>& arguments)
             check(extension == ".avi", "restore writes MJPEG AVI; output extension must be .avi");
             auto partial = output; partial += ".partial";
             auto writer = mjxl::make_avi_writer(partial, movie, fourcc('M', 'J', 'P', 'G'));
-            std::unique_ptr<mjxl::FlacDecoder> decoder;
+            std::unique_ptr<mjxl::FlacDecoder> flacDecoder;
+            std::unique_ptr<mjxl::AlacDecoder> alacDecoder;
+            const mjxl::PcmFormat format{movie.bits, movie.channels, movie.sampleRate, movie.channelMask};
             if (movie.flac) {
-                decoder = std::make_unique<mjxl::FlacDecoder>(movie.streamInfo, mjxl::PcmFormat{movie.bits, movie.channels, movie.sampleRate});
+                flacDecoder = std::make_unique<mjxl::FlacDecoder>(movie.streamInfo, format);
+            } else if (movie.alac) {
+                alacDecoder = std::make_unique<mjxl::AlacDecoder>(movie.streamInfo, format);
             }
             for (const auto& p : movie.packets) {
                 if (p.video) {
                     const auto jpeg = codec.jpeg(p.bytes);
                     writer->packet(true, jpeg);
-                } else if (decoder) {
-                    const auto pcm = decoder->decode(p.bytes);
-                    if (!pcm.empty()) { writer->packet(false, pcm); }
                 } else {
-                    writer->packet(false, p.bytes);
+                    const auto pcm = flacDecoder ? flacDecoder->decode(p.bytes) : alacDecoder ? alacDecoder->decode(p.bytes) : p.bytes;
+                    if (!pcm.empty()) {
+                        writer->packet(false, pcm);
+                    }
                 }
             }
-            if (decoder) {
-                const auto pcm = decoder->flush();
-                if (!pcm.empty()) { writer->packet(false, pcm); }
+            if (flacDecoder) {
+                const auto pcm = flacDecoder->flush();
+                if (!pcm.empty()) {
+                    writer->packet(false, pcm);
+                }
             }
             writer->finish();
             verify(movie, partial, codec, false);

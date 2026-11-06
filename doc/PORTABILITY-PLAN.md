@@ -5,6 +5,13 @@ English | [Detailed Korean design](PORTABILITY-PLAN.ko.md)
 Date: 2026-11-06. Status: design under incremental implementation; see the checkpoint below. This companion summarizes the detailed Korean design and its delivery gates. Target and API names below are proposals.
 
 
+
+## ALAC/MOV checkpoint: 2026-11-06
+
+Implemented independent Apple ALAC encoding/decoding, a native MOV writer and private MJXO/MJXA recovery atoms. MOV defaults to ALAC, MKV accepts explicit ALAC while keeping FLAC by default, and AVI keeps FLAC with a private explicit ALAC experiment. The first checkpoint below describes historical ALAC/MOV absence, not current support.
+
+Validated 56 real-input and 30 synthetic codec/container combinations for exact restoration, external PCM and payload equality. AVI ALAC fails automatic FFmpeg identification, so a universal ALAC default is deferred. See the [measurements](AUDIO-CONTAINERS.md) and [implemented profile](MOV-ALAC-PROFILE.md). Independent container readers/MKV writing, GStreamer and macOS apps/extensions remain pending.
+
 ## Implementation checkpoint: 2026-11-06
 
 The first increment implements accounting, initial library boundaries, and independent FLAC/SHA-256 backends. The CLI container backend still requires FFmpeg. MOV/ALAC, native AVI/MOV readers, independent MKV, GStreamer, and macOS apps/extensions remain unimplemented.

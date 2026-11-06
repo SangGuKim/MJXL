@@ -2,7 +2,7 @@
 
 [English](README.md) | **한국어**
 
-기존 MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축해 저장 공간을 줄이는 Windows·Linux 실험 프로젝트이다. 네이티브 CLI는 독립 JXL 프레임을 실험용 FourCC `MJXL`의 AVI 또는 Matroska(MKV)에 저장한다. 두 컨테이너 모두 기본적으로 원본 파일 전체를 바이트 단위로 복원하는 정보도 포함한다. PCM 음성은 기본적으로 무손실 FLAC으로 저장하며 `--copy-audio`를 주면 그대로 복사한다.
+기존 MJPEG 영상의 JPEG 프레임을 JPEG XL로 가역 재압축해 저장 공간을 줄이는 Windows·Linux 실험 프로젝트이다. 네이티브 CLI는 독립 JXL 프레임을 실험용 FourCC `MJXL`의 AVI·Matroska(MKV)·MOV에 저장한다. 세 컨테이너 모두 기본적으로 원본 파일 전체를 바이트 단위로 복원하는 정보도 포함한다. AVI/MKV 음성은 기본적으로 무손실 FLAC, MOV는 ALAC으로 저장하며 `--copy-audio`를 주면 그대로 복사한다.
 
 ## 왜 MJPEG를 이런 방식으로 보존하는가?
 
@@ -61,7 +61,7 @@ FLAC 저장은 8/16/24비트 PCM을 지원하며 32비트 PCM은 PCM으로 둔�
 
 인코딩과 검증이 성공하면 음성·영상·복원 payload·순수 컨테이너의 크기를 나누어 출력한다. 헤더·인덱스·정렬 패딩과 복원 데이터 wrapper는 컨테이너 항목에 포함하고 복원 payload 자체는 별도로 센다. 원본의 복원 payload 기준은 0이며 네 항목의 합은 전체 파일 크기와 일치한다. 감소율이 음수이면 커진 것이고 기준 크기가 0이면 `n/a`로 표시한다.
 
-`encode`는 출력 확장자 `.avi` 또는 `.mkv`로 컨테이너를 선택하며 대소문자는 구분하지 않는다. 다른 출력 확장자는 거부한다. MKV는 FFmpeg의 Matroska 작성기로 `V_MS/VFW/FOURCC`와 `MJXL`을 기록하며, 원본 복원 정보는 MIME 형식이 `application/x-mjxl-original`인 `mjxl-original.bin` 첨부 데이터에 보관한다. FLAC 트랙의 `MJXL_ORIGINAL_BITS` 메타데이터에 원래 PCM 비트 깊이를 남긴다. `verify`·`restore-original`·`bench`는 두 컨테이너를 모두 읽는다. `restore`는 항상 MJPEG AVI를 쓰며 `.avi` 확장자가 필요하다. 같은 입력과 압축 강도에서 미디어 데이터는 같지만 컨테이너 비용은 다르다. 검사한 샘플 4개에서는 MKV가 AVI보다 970~21,638바이트 컸으며, 더 작은 컨테이너 비용을 보장하지 않는다.
+`encode`는 출력 확장자 `.avi`·`.mkv`·`.mov`로 컨테이너를 선택하며 대소문자는 구분하지 않는다. 다른 출력 확장자는 거부한다. MKV는 FFmpeg의 Matroska 작성기로 `V_MS/VFW/FOURCC`와 `MJXL`을 기록하며, 원본 복원 정보는 MIME 형식이 `application/x-mjxl-original`인 `mjxl-original.bin` 첨부 데이터에 보관한다. FLAC 트랙의 `MJXL_ORIGINAL_BITS` 메타데이터에 원래 PCM 비트 깊이를 남긴다. `verify`·`restore-original`·`bench`는 세 컨테이너를 모두 읽는다. `restore`는 항상 MJPEG AVI를 쓰며 `.avi` 확장자가 필요하다. 같은 입력과 압축 강도에서 미디어 데이터는 같지만 컨테이너 비용은 다르다. 검사한 샘플 4개에서는 MKV가 AVI보다 970~21,638바이트 컸으며, 더 작은 컨테이너 비용을 보장하지 않는다.
 
 MOV 샘플 4개의 두 음성 모드에서 MKV 변환, 원본 파일 전체 복원, FFmpeg 영상·음성 디코딩을 통과했다. 사용자는 4.2초 PCM·FLAC MKV의 팟플레이어 재생과 탐색이 정상임을 확인했다. 해당 MKV의 탐색기 썸네일은 표시되지 않았으며 Preview 창은 검사하지 않았다. 이번 변경은 썸네일 처리기를 설치하지 않는다. MKV의 CLI 왕복 검사를 반복하려면 `native/validate_cli.py`에 `--container mkv`를 추가하고 새 출력 폴더를 사용한다. 현재 MKV 구현은 Windows에서 검사했으며 Linux에서는 아직 재빌드하거나 검사하지 않았다.
 
@@ -83,6 +83,8 @@ CLI는 C++20 컴파일러와 시스템 FFmpeg·libjxl·Brotli를 사용한다. U
 
 ```bash
 sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg
+git clone https://github.com/macosforge/alac.git _deps/alac
+git -C _deps/alac checkout --detach c38887c5c5e64a4b31108733bd79ca9b2496d987
 make -C native -j4
 mkdir -p results
 ./dist/linux/mjxl encode input.mov results/output.avi
@@ -118,7 +120,7 @@ GStreamer(`gst`) 연동과 macOS 재생 지원을 추진할 계획이다. 둘 �
 FFmpeg 의존성 제거, MOV 입출력, GStreamer와 macOS 지원의 설계 및 단계별 완료 기준은 [이식성과 컨테이너 구현 계획](doc/PORTABILITY-PLAN.ko.md)에 정리한다.
 
 
-첫 이식성 구현은 오디오에 libFLAC 1.5.0, 복원 hash에 PicoSHA2를 사용한다. CLI의 컨테이너 읽기와 MKV 쓰기는 아직 FFmpeg가 필요하다. `--audio-codec auto|flac|copy`로 현재 오디오 경로를 선택하며 `--copy-audio`는 copy의 호환 별칭이다. 명시한 코덱의 미지원 형식과 상충 옵션은 오류로 처리한다. `alac`은 파서만 인식하고 backend 미구현 오류로 거부하며 출력 파일은 만들지 않는다. MOV 출력은 아직 제공하지 않는다.
+첫 이식성 구현은 오디오에 libFLAC 1.5.0, 복원 hash에 PicoSHA2를 사용한다. CLI의 컨테이너 읽기와 MKV 쓰기는 아직 FFmpeg가 필요하다. `--audio-codec auto|flac|alac|copy`로 현재 오디오 경로를 선택하며 `--copy-audio`는 copy의 호환 별칭이다. 명시한 코덱의 미지원 형식과 상충 옵션은 오류로 처리한다. ALAC 인코딩·디코딩은 버전을 고정한 Apple 공개 구현을 사용한다. 자체 MOV 출력은 기본 ALAC, MKV는 명시적 ALAC을 지원한다. AVI ALAC은 아래의 private 실험 스위치를 요구한다.
 
 FFmpeg SDK 없이 공통 라이브러리를 검사하는 방법은 다음과 같다.
 
@@ -129,3 +131,16 @@ ctest --test-dir _build/portable-codecs -C Release --output-on-failure
 ```
 
 Windows 의존성은 `native/prepare_deps.ps1`로 준비한다. system-library CMake 경로는 libjxl·Brotli·libFLAC 개발 패키지가 필요하며 전환 중인 CLI에는 FFmpeg 개발 라이브러리도 필요하다.
+
+
+## ALAC과 자체 MOV 출력
+
+MOV는 자체 writer와 ALAC을 기본으로 사용하며 --copy-audio로 PCM을 선택한다. MKV는 명시적 ALAC을 지원하되 기본 FLAC을 유지한다. AVI ALAC은 아래 두 옵션을 모두 요구하는 private 실험이다. FFmpeg가 AVI의 오디오를 자동 식별하지 못하므로 Windows 플레이어 호환성을 전제하지 않는다.
+
+```powershell
+& $mjxl encode input.mov output.mov
+& $mjxl encode input.mov output.mkv --audio-codec alac
+& $mjxl encode input.mov experimental.avi --audio-codec alac --experimental-avi-alac
+```
+
+세 컨테이너 모두 원본 전체 복원 정보를 유지한다. 명시한 코덱·채널 배치가 미지원이면 오류로 처리하고 MOV auto는 ALAC 프로필 밖의 PCM을 그대로 복사한다. 검사한 PCM8 카메라 자료처럼 ALAC이 FLAC이나 PCM보다 클 수 있다. [실측 비교](doc/AUDIO-CONTAINERS.ko.md)와 [MOV·ALAC 프로필](doc/MOV-ALAC-PROFILE.ko.md)을 참고한다. Windows FFmpeg 검증과 별개로 QuickTime Player·macOS 재생과 썸네일은 아직 검증하지 않았다. prepare_deps.ps1은 버전을 고정한 Apple ALAC 소스도 준비한다. 현재 Linux/macOS 빌드에도 해당 소스와 CMake 3.28 이상이 필요하다.

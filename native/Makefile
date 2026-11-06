@@ -1,37 +1,16 @@
-# Builds the mjxl command line tool with GCC or Clang on Linux.
-# The DirectShow filter and the Media Foundation decoder are Windows only.
-#
-# Ubuntu packages:
-#   sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev \
-#       libavformat-dev libavcodec-dev libavutil-dev
-
+# Compatibility entry point for the shared CMake build on Linux.
+# Requires CMake 3.28+, system libjxl/Brotli/libFLAC/FFmpeg development packages,
+# and pinned Apple ALAC sources in ../_deps/alac (see README.md).
 CXX ?= g++
-PKG_CONFIG ?= pkg-config
+CMAKE ?= cmake
+JOBS ?= 4
 BUILD_DIR ?= ../_build/linux
 OUTPUT_DIR ?= ../dist/linux
-
-PACKAGES := libjxl libjxl_threads flac libavformat libavcodec libavutil libbrotlienc libbrotlidec
-SOURCES := encoder.cpp container.cpp cli.cpp audio_policy.cpp core.cpp flac_audio.cpp original_file.cpp
-OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
-TARGET := $(OUTPUT_DIR)/mjxl
-
 CXXFLAGS ?= -O2
-ALL_CXXFLAGS := -std=c++20 -Wall -Wextra $(CXXFLAGS) $(shell $(PKG_CONFIG) --cflags $(PACKAGES))
-LIBS := $(shell $(PKG_CONFIG) --libs $(PACKAGES))
 
 .PHONY: all clean
-
-all: $(TARGET)
-
-$(TARGET): $(OBJECTS)
-	@mkdir -p $(@D)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
-
-$(BUILD_DIR)/%.o: %.cpp
-	@mkdir -p $(@D)
-	$(CXX) $(ALL_CXXFLAGS) -MMD -MP -c -o $@ $<
-
+all:
+	$(CMAKE) -S .. -B $(BUILD_DIR) -DMJXL_USE_BUNDLED_DEPS=OFF -DMJXL_BUILD_WINDOWS_ADAPTERS=OFF -DMJXL_BUILD_CLI=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=$(CXX) -DCMAKE_CXX_FLAGS="$(CXXFLAGS)" -DMJXL_RUNTIME_DIRECTORY="$(abspath $(OUTPUT_DIR))"
+	$(CMAKE) --build $(BUILD_DIR) --target mjxl --parallel $(JOBS)
 clean:
-	rm -f $(OBJECTS) $(OBJECTS:.o=.d) $(TARGET)
-
--include $(OBJECTS:.o=.d)
+	@if test -f $(BUILD_DIR)/CMakeCache.txt; then $(CMAKE) --build $(BUILD_DIR) --target clean; fi

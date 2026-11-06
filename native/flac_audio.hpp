@@ -10,21 +10,29 @@ struct PcmFormat {
     unsigned bits = 0;       /**< Bits per sample of the original PCM. */
     unsigned channels = 0;   /**< Number of interleaved channels. */
     unsigned sampleRate = 0; /**< Samples per second for each channel. */
+    uint64_t channelMask = 0; /**< Native speaker mask, or zero for the codec default. */
 };
 
-/** @brief One encoded FLAC frame and the position of its first sample. */
+/** @brief One encoded lossless audio frame and the position of its first sample. */
 struct FlacPacket {
     int64_t position = 0;       /**< Index of the first sample per channel. */
     std::vector<uint8_t> bytes; /**< Encoded FLAC frame. */
 };
 
-/** @brief Complete FLAC stream produced from one PCM buffer. */
-struct FlacStream {
-    std::vector<uint8_t> streamInfo; /**< Final 34-byte STREAMINFO block. */
+/** @brief Lossless audio bitstream type. */
+enum class AudioEncoding { Flac, Alac };
+
+/** @brief Complete lossless audio stream produced from one PCM buffer. */
+struct EncodedAudio {
+    AudioEncoding encoding = AudioEncoding::Flac; /**< Codec identifying the configuration and packets. */
+    std::vector<uint8_t> streamInfo; /**< FLAC STREAMINFO or 24-byte ALAC configuration. */
     std::vector<FlacPacket> packets; /**< Encoded frames in stream order. */
     unsigned frameSamples = 0;       /**< Samples per channel in a full frame. */
-    unsigned storedBits = 0;         /**< Bit depth recorded in the FLAC stream. */
+    unsigned storedBits = 0;         /**< Bit depth recorded in the compressed stream. */
 };
+
+/** @brief Backward-compatible name for the FLAC encoder result. */
+using FlacStream = EncodedAudio;
 
 /**
  * @brief Tells whether the PCM layout can be stored as FLAC and restored exactly.

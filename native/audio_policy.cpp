@@ -1,4 +1,5 @@
 #include "audio_policy.hpp"
+#include "alac_audio.hpp"
 #include <stdexcept>
 
 namespace mjxl {
@@ -34,7 +35,10 @@ AudioSelection select_audio(Container container, AudioCodec requested, const Pcm
 {
     if (requested == AudioCodec::Auto) {
         if (container == Container::Mov) {
-            return {AudioCodec::Alac, "MOV defaults to Apple Lossless"};
+            if (alac_supported(format)) {
+                return {AudioCodec::Alac, "MOV defaults to Apple Lossless"};
+            }
+            return {AudioCodec::Copy, "PCM format or speaker layout is outside the ALAC profile"};
         }
         if (flac_supported(format)) {
             return {AudioCodec::Flac, "AVI/MKV default to FLAC for this PCM format"};
@@ -43,6 +47,9 @@ AudioSelection select_audio(Container container, AudioCodec requested, const Pcm
     }
     if (requested == AudioCodec::Flac && !flac_supported(format)) {
         throw std::invalid_argument("The requested FLAC codec cannot preserve this PCM format; use auto or copy");
+    }
+    if (requested == AudioCodec::Alac && !alac_supported(format)) {
+        throw std::invalid_argument("The requested ALAC codec cannot preserve this PCM format or speaker layout; use auto or copy");
     }
     return {requested, "Explicit audio codec selection"};
 }

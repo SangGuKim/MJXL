@@ -142,3 +142,16 @@ Use `-vcodec libjxl` for ffplay and place FFmpeg `-c:v libjxl` before `-i`. Opti
 `register_mft.ps1` copies the MFT to Program Files and registers it for desktop use after administrator elevation. `-Unregister` removes registration. That registration alone did not enable Windows Media Player playback; support remains incomplete and DirectShow is the recommended current path. Media Foundation AVI sources stall on FLAC audio, so encode with `--copy-audio` for MFT experiments.
 
 `package_mft.ps1` creates a media-extension MSIX using Windows SDK. `-Sign` creates or reuses a 30-day development code-signing certificate in the current-user My store. It does not add trust-store entries or install the package. The development package was not installed and validated in Media Player and is not a production installer. Certificates, private keys, and signed packages are excluded from Git.
+
+
+## ALAC and native MOV
+
+MOV uses the native writer with ALAC by default; --copy-audio selects PCM. MKV supports explicit ALAC but retains its FLAC default. AVI ALAC is a private experiment requiring both flags below; FFmpeg does not automatically identify this AVI audio, so do not assume Windows player support.
+
+```powershell
+& $mjxl encode input.mov output.mov
+& $mjxl encode input.mov output.mkv --audio-codec alac
+& $mjxl encode input.mov experimental.avi --audio-codec alac --experimental-avi-alac
+```
+
+All three retain original-file recovery. Unsupported explicit codecs/layouts fail; MOV auto copies PCM when its layout is outside the ALAC profile. ALAC can be larger than FLAC or PCM, particularly in the checked PCM8 camera samples. See the [measured comparison](../doc/AUDIO-CONTAINERS.md) and [MOV/ALAC file profile](../doc/MOV-ALAC-PROFILE.md). QuickTime Player/macOS playback and thumbnails remain unvalidated, even though the ALAC audio and MOV structure pass the Windows FFmpeg checks. prepare_deps.ps1 now prepares pinned Apple ALAC sources; current Linux/macOS builds also require those sources and CMake 3.28+.

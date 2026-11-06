@@ -12,6 +12,7 @@ struct CommandLine {
     std::vector<std::string> paths; /**< Path arguments in command order. */
     bool help = false;              /**< True when help was requested or no command was given. */
     bool missingCommand = false;    /**< True when no arguments were given at all. */
+    bool experimentalAviAlac = false; /**< Enables the private AVI ALAC experiment. */
     AudioCodec audioCodec = AudioCodec::Auto; /**< Requested audio codec or container default. */
     bool noOriginal = false;        /**< Allow output or input without original file data. */
     int effort = 7;                 /**< JPEG XL encoder effort from 1 to 10. */

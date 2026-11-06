@@ -175,3 +175,38 @@ Validation on Windows x64 / VS2026 v145:
 - Independent FFmpeg decoding matched normalized original PCM and decoded video for all 28 new outputs. AVI/MKV video and audio packet payloads matched in all 14 pairs. Unavailable/invalid/conflicting codec requests were rejected without output creation. Summary: results/portability-crosscheck.json.
 
 Library preparation now pins libFLAC at 1507800de4b70e21be71f38caa0d9079d0bc6e45; build packaging copies FLAC and PicoSHA2 licenses. The MSVC libFLAC target force-includes stdlib.h to supply missing allocation declarations in upstream win_utf8_io.c without editing downloaded sources. No commit or push was performed.
+
+## 2026-11-06: ALAC, native MOV and container comparison
+
+Before this increment, committed and pushed 5238327 with author/committer peperu <peepru@outlook.com> as requested. Push initially used the company SSH identity and failed; a repository-local core.sshCommand now selects the pre-existing personal key, with global SSH settings unchanged. The ALAC work below is subsequent uncommitted work.
+
+Implemented Apple ALAC encoding/decoding pinned to c38887c5c5e64a4b31108733bd79ca9b2496d987. PCM8 promotion preserves amplitude; PCM16/24/32 and supported speaker layouts use reversible channel permutation. Known unsupported speaker layouts fail for explicit ALAC and fall back to PCM in MOV auto. Generated checked source copies add frame/input bounds and the zero-shift predictor correction; original downloaded files are untouched. libFLAC remains the AVI/MKV default and legacy reader.
+
+Native MOV writing now stores independent MJXL video, ALAC or PCM, exact rational video timing, co64, and private moov/udta MJXO/MJXA atoms for complete original recovery. MKV supports explicit ALAC via its existing FFmpeg writer. AVI ALAC uses private WAVE tag 0xA1AC behind --audio-codec alac --experimental-avi-alac; this is not a standard mapping. Native verification passes but external FFmpeg needs forced -c:a alac audio decoding. Do not infer AVI Splitter or PotPlayer support. CLI media reading and MKV writing still require FFmpeg.
+
+Windows Release build and standalone CTest passed: 54 FLAC cases and 40 ALAC depth/channel/length cases plus configuration/truncation and policy checks. The camera suite in results/alac-v2-camera covers seven real inputs and 56 codec/container combinations. The final synthetic suite in results/alac-v4-synthetic covers 16/24/32-bit stereo and 5.1-channel input in 30 successful combinations; two explicit PCM32 FLAC refusals are expected. Each suite checks exact physical original restoration, external normalized PCM, video decoding and identical media packet digests across containers, plus MJPEG restoration from ALAC. The earlier incomplete synthetic run in results/alac-v2-synthetic stopped at the expected PCM32 FLAC refusal; it is superseded, not a completed validation report.
+
+Additional checks in results/alac-v5-edges passed for 96 kHz ALAC, quad auto fallback/explicit refusal, video-only AVI/MKV/MOV, seek, no-original policy, malformed atom sizes and duplicate recovery atoms. The earlier results/alac-v4-edges fixture attempt stopped on a diagnostic FFmpeg duration argument before encoding and is not a validation result. No diagnostic files were deleted.
+
+For the seven PCM8 camera inputs, raw audio totals 556,392 bytes, FLAC 374,249 (-32.74%), and ALAC 939,327 (+68.82% over raw; +150.99% over FLAC). Within MKV, complete archives total 54,399,041 bytes for FLAC and 54,962,913 for ALAC (+1.04%). AVI/MKV therefore retain FLAC defaults. MOV retains its Apple-oriented ALAC default, with --copy-audio producing smaller MOVs on these particular inputs. See AUDIO-CONTAINERS and MOV-ALAC-PROFILE in both languages for measurements and file conventions.
+
+The built CLI is in dist/Release and ALAC's license is copied by the build script. The Linux Makefile now delegates to common CMake; the ALAC/MOV revision was not built on Linux/macOS. No installation/registration, physical QuickTime/PotPlayer playback, GStreamer or Finder validation was performed. No additional commit or push was made after 5238327.
+
+
+## 2026-11-06: Follow-up MOV playback diagnosis
+
+Use only outputs derived from W:/proj/mjxl/samples for diagnosis; do not directly access the user's K: drive. Stopped relying on PotPlayer's existing playlist and opened explicit W: paths.
+
+PotPlayer playback information showed working ALAC through Built-in Audio Codec/Transform, but no video decoder. File information listed the MJXL video track; the running graph contained only Built-in MP4 Source, the audio decoder and WASAPI renderer. Diagnostic FFmpeg-remuxed MOVs with either ALAC or PCM also lacked video. Keep audio compression behavior separate from MOV video routing. The user confirmed AVI/MKV+FLAC playback, and the AVI automatic DirectShow playback/seek control passed.
+
+A temporary reversed-FOURCC registration did not help. Removed that source change and restored/re-registered the original installed decoder, checking its SHA-256 against the backup; restored the installation file list. Diagnostic remuxes omit original-file recovery data and are not archival outputs.
+
+The user confirmed visible playback of the W: MJXL MOV+ALAC using ffplay with explicit -vcodec libjxl; exit code was zero. A warning about automatic identification of the MJXL sample entry may remain. This path does not use MFT.
+
+```powershell
+& C:/sdk/ffmpeg/bin/ffplay.exe -vcodec libjxl W:/proj/mjxl/results/alac-v2-camera/mov/alac/IMG_20060430_203434.mov
+```
+
+The user reports Explorer thumbnails for MJPEG MOV and MJXL AVI, but not MJXL MOV. A shared cause between PotPlayer and the thumbnail handler has not been established. MFT is not installed; DirectShow registration alone does not establish MOV thumbnail support. macOS MediaExtension routing, any necessary Format Reader, QuickTime playback and Finder thumbnails remain separate future gates.
+
+Discussed comparing actual compressed audio size with PCM in auto mode and keeping PCM when compression grows it. This is not implemented yet: MOV auto currently uses format/layout capability only. Explicit ALAC selection should remain honored.
