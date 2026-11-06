@@ -31,7 +31,7 @@ libjxl 0.11.2와 필수 하위 의존성은 `_deps/libjxl`에서 정적으로 �
 `mjxl` 명령줄 도구는 GCC나 Clang으로 빌드할 수 있다. 시스템의 FFmpeg, libjxl, Brotli를 사용한다. DirectShow 필터와 Media Foundation 디코더는 Windows 전용이다. 결과는 `dist/linux/mjxl`에 생성한다.
 
 ```bash
-sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat-dev libavcodec-dev libavutil-dev
+sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev
 make -C native
 ```
 
@@ -73,7 +73,7 @@ $mjxl = '.\dist\Release\mjxl.exe'
 & $mjxl restore-original .\results\example.avi .\results\restored.MOV
 ```
 
-FLAC 저장은 FFmpeg FLAC 인코더를 사용한다. 이 인코더는 8비트를 지원하지 않으므로 8비트 PCM은 16비트 FLAC의 상위 바이트에 저장하고, 원래 비트는 `hdrl` 안의 `mjxa` 청크에 기록한다. 24비트는 24비트 FLAC으로 저장하고 32비트 PCM은 PCM으로 유지한다. `restore`와 `restore-original`은 이 정보로 원래 PCM 바이트를 되돌리며, `mjxa`가 없는 FLAC AVI는 거부한다.
+FLAC 인코딩과 디코딩은 FFmpeg 대신 버전을 고정한 libFLAC 1.5.0을 사용한다. 기존 파일과 호환되도록 PCM8은 16비트 FLAC의 상위 바이트에 저장하고 원래 depth는 mjxa에 보존한다. PCM24는 24비트 FLAC으로 저장하고 PCM32는 PCM으로 유지한다. 복원 시 원래 PCM 바이트로 되돌리며 mjxa가 없는 FLAC AVI는 거부한다. 과거 FFmpeg 압축률 측정은 새 backend의 측정 결과가 아니다.
 
 PCM 바이트 일치 검증은 플레이어에서 잡음 없이 출력된다는 보장과 다르다. 팟플레이어가 18바이트 `strf`에서 주기적인 잡음을 내므로 PCM AVI는 16바이트 `strf`를 쓴다. 자세한 내용은 [현재 작업 기록](../doc/WORKLOG.ko.md)을 참고한다.
 

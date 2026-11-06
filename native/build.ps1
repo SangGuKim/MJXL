@@ -47,8 +47,10 @@ if (-not $ffmpegLicense) { throw 'The FFmpeg license file was not found.' }
 Copy-Item -LiteralPath $ffmpegLicense -Destination (Join-Path $destination 'FFmpeg-LICENSE.txt')
 $licenseRoot = Join-Path $destination 'licenses'
 New-Item -ItemType Directory -Path $licenseRoot -Force | Out-Null
-foreach ($entry in @(@('libjxl\LICENSE','JPEG-XL-LICENSE.txt'), @('libjxl\PATENTS','JPEG-XL-PATENTS.txt'), @('libjxl\third_party\brotli\LICENSE','Brotli-LICENSE.txt'), @('libjxl\third_party\highway\LICENSE','Highway-LICENSE.txt'), @('libjxl\third_party\skcms\LICENSE','skcms-LICENSE.txt'), @('windows-samples\LICENSE','DirectShow-samples-LICENSE.txt'))) {
+foreach ($entry in @(@('libjxl\LICENSE','JPEG-XL-LICENSE.txt'), @('libjxl\PATENTS','JPEG-XL-PATENTS.txt'), @('libjxl\third_party\brotli\LICENSE','Brotli-LICENSE.txt'), @('libjxl\third_party\highway\LICENSE','Highway-LICENSE.txt'), @('libjxl\third_party\skcms\LICENSE','skcms-LICENSE.txt'), @('windows-samples\LICENSE','DirectShow-samples-LICENSE.txt'), @('flac\COPYING.Xiph','FLAC-LICENSE.txt'))) {
     $licenseSource = Join-Path $projectRoot "_deps\$($entry[0])"
     if (Test-Path -LiteralPath $licenseSource) { Copy-Item -LiteralPath $licenseSource -Destination (Join-Path $licenseRoot $entry[1]) }
 }
 Write-Output "Build completed: $destination"
+
+Copy-Item -LiteralPath (Join-Path $projectRoot 'native\third_party\picosha2\LICENSE') -Destination (Join-Path $licenseRoot 'PicoSHA2-LICENSE.txt')

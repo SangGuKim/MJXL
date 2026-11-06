@@ -39,7 +39,7 @@ bool flac_supported(const PcmFormat& format);
  * @param format Original PCM layout.
  * @return Encoded frames and the final STREAMINFO block.
  *
- * FFmpeg stores 8-bit PCM as 16-bit FLAC, so 8-bit samples occupy the upper byte.
+ * For compatibility, 8-bit PCM occupies the upper byte of a 16-bit FLAC sample.
  */
 FlacStream flac_encode(std::span<const uint8_t> pcm, const PcmFormat& format);
 

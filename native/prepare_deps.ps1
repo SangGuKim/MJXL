@@ -20,4 +20,13 @@ if (-not (Test-Path -LiteralPath $samples)) {
     & git -C $samples sparse-checkout set Samples/Win7Samples/multimedia/directshow/baseclasses
     if ($LASTEXITCODE) { throw 'Failed to select the DirectShow base classes.' }
 }
+
+$flac = Join-Path $dependencyRoot 'flac'
+if (-not (Test-Path -LiteralPath $flac)) {
+    & git clone --depth 1 --branch 1.5.0 https://github.com/xiph/flac.git $flac
+    if ($LASTEXITCODE) { throw 'Failed to download libFLAC.' }
+}
+$flacCommit = & git -C $flac rev-parse HEAD
+if ($flacCommit -ne '1507800de4b70e21be71f38caa0d9079d0bc6e45') { throw 'Unexpected libFLAC version. Existing dependencies were not modified.' }
+
 Write-Output 'Dependency preparation completed.'

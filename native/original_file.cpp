@@ -7,16 +7,13 @@
 #include <stdexcept>
 #include <brotli/decode.h>
 #include <brotli/encode.h>
-extern "C" {
-#include <libavutil/mem.h>
-#include <libavutil/sha.h>
-}
+#include "third_party/picosha2/picosha2.h"
 
 namespace mjxl {
 namespace {
 constexpr uint32_t kVersion = 1;
 constexpr size_t kHashSize = 32;
-// Non-audio/video bytes contain only container data; treat sizes above this limit as corrupt.
+// 미디어 외의 컨테이너 데이터는 이 크기를 넘으면 손상된 것으로 처리한다.
 constexpr uint64_t kResidueLimit = 1ULL << 32;
 constexpr uint64_t kTableLimit = 256ULL * 1024 * 1024;
 
@@ -29,13 +26,8 @@ void require(bool value, const char* message)
 
 std::array<uint8_t, kHashSize> sha256(std::span<const uint8_t> data)
 {
-    AVSHA* context = av_sha_alloc();
-    require(context != nullptr, "Cannot allocate SHA-256 context");
     std::array<uint8_t, kHashSize> result{};
-    av_sha_init(context, 256);
-    av_sha_update(context, data.data(), data.size());
-    av_sha_final(context, result.data());
-    av_free(context);
+    picosha2::hash256(data.begin(), data.end(), result.begin(), result.end());
     return result;
 }
 
@@ -53,7 +45,7 @@ std::vector<uint8_t> compress(std::span<const uint8_t> data)
     return output;
 }
 
-// Grow memory only as data is actually decompressed instead of trusting a declared size.
+// 선언된 크기를 신뢰하지 않고 실제로 해제된 데이터만큼만 메모리를 늘린다.
 std::vector<uint8_t> decompress(std::span<const uint8_t> data, size_t expected)
 {
     std::vector<uint8_t> output;
@@ -99,7 +91,7 @@ void put_value(std::vector<uint8_t>& output, T value)
     output.insert(output.end(), bytes, bytes + sizeof(T));
 }
 
-// Parse every field through this reader to prevent out-of-bounds reads.
+// 모든 필드를 경계 검사하는 reader로 읽어 범위 밖 접근을 막는다.
 class Reader {
     std::span<const uint8_t> data_;
     size_t position_ = 0;
@@ -147,7 +139,7 @@ struct Span {
     const uint8_t* source;
 };
 
-// Validate non-overlapping packet ranges within the file, then sort them by position.
+// 파일 내부 패킷 범위가 겹치지 않는지 검사하고 위치순으로 정렬한다.
 void sort_spans(std::vector<Span>& spans, uint64_t fileSize)
 {
     std::stable_sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) { return a.position < b.position; });
@@ -168,7 +160,7 @@ std::vector<uint8_t> pack_original(std::span<const uint8_t> file, const std::vec
     for (const auto& packet : packets) {
         require(packet.position <= uint64_t((std::numeric_limits<int64_t>::max)()), "Original packet position is too large");
         spans.push_back({packet.position, packet.size, nullptr});
-        // Most packets follow the previous packet, so store only offsets; video sizes come from reconstructed JPEGs.
+        // 연속 패킷은 상대 위치만 기록하고 영상 크기는 복원된 JPEG에서 얻는다.
         const int64_t delta = static_cast<int64_t>(packet.position) - previousEnd;
         put_varint(table, (static_cast<uint64_t>(delta) << 1) ^ static_cast<uint64_t>(delta >> 63));
         put_varint(table, packet.video ? 1 : uint64_t(packet.size) << 1);
@@ -230,7 +222,7 @@ std::vector<uint8_t> rebuild_original(std::span<const uint8_t> payload, const st
         const auto zigzag = layout.varint();
         const uint64_t delta = (zigzag >> 1) ^ (0 - (zigzag & 1));
         const auto entry = layout.varint();
-        // Unsigned addition represents negative offsets; subsequent file-range checks reject invalid values.
+        // 음수 상대 위치도 unsigned 덧셈으로 표현하고 후속 파일 범위 검사로 잘못된 값을 거부한다.
         Span span{previousEnd + delta, 0, nullptr};
         if (entry == 1) {
             require(videoIndex < video.size(), "Original layout has too many video packets");

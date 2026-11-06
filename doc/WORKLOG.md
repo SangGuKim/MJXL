@@ -157,3 +157,21 @@ At the user's request, stop here for today. The checkpoint is remote/local `main
 ### Follow-up: requested source checkpoint
 
 The user subsequently requested committing and pushing today's source and documentation so work can resume on another PC. The preceding uncommitted/no-push status describes the state before that request. This checkpoint contains source and documentation only; samples, diagnostic media, dependencies, and build outputs remain local and ignored. On another PC, fetch/pull `main`, prepare dependencies, and rebuild before installing. Do not assume the `C:/Temp` MOV diagnostics or ignored `results` files are available there. No further implementation is requested tonight.
+
+## 2026-11-06: Portability implementation, first increment
+
+Implemented four-way accounting (audio, video, recovery payload, pure container), with total checks in validate_cli.py and a fixture SHA-256 manifest in native/testdata. The archive payload format remains version 1. Replaced libavutil SHA-256 with unmodified vendored PicoSHA2 (MIT, pinned provenance) and replaced FFmpeg FLAC encoding/decoding with libFLAC 1.5.0, including callback exception containment, final STREAMINFO and legacy PCM8 representation. Decoder frame CRC failures and truncated packets fail rather than returning partial audio. Whole-file verification continues to check original SHA-256.
+
+Split CLI orchestration from container.cpp and introduced container.hpp without FFmpeg types. CMake now has mjxl_core, mjxl_audio, mjxl_archive and mjxl_container boundaries, optional Windows adapters, optional portable tests, and a system-package branch for Linux/macOS. The last branch has not been built on those platforms. FFmpeg remains required by the transitional CLI container backend. This increment does not implement MOV/ALAC, GStreamer, native container replacements, or macOS apps/extensions.
+
+Added --audio-codec auto|flac|alac|copy with --copy-audio compatibility. Auto retains FLAC for supported AVI/MKV PCM formats and copies PCM32. Explicit unsupported FLAC formats, conflicting options, and the unimplemented ALAC backend fail; the latter does not create output files. No experimental AVI ALAC or optional external-FFmpeg backend is exposed yet.
+
+Validation on Windows x64 / VS2026 v145:
+
+- Full Release build passed, including existing DirectShow/MFT targets; this is a build check, not a new playback/registration check. Built files are in dist/Release; no installation or registration was performed.
+- Separate MJXL_BUILD_CLI=OFF / MJXL_BUILD_WINDOWS_ADAPTERS=OFF build and CTest passed. The test covers 54 FLAC cases (PCM8/16/24, 1/2/8 channels, 8040/44100/48000 Hz, 1/5003 samples), damaged/truncated packets, policy and CLI conflicts, SHA-256 known answers, and archive integrity. dumpbin shows only KERNEL32.dll for the test executable, with no FFmpeg dependency.
+- Seven real camera MOV files passed 28 fresh encodes (AVI/MKV times PCM/FLAC), media verification, physical original restoration and SHA-256 comparison, four-component sum checks, MJPEG restoration and a first-sample RGB bench in each container suite. Effort 1 was used for regression speed, not a compression benchmark. Reports are in results/portability-v1-avi and results/portability-v1-mkv.
+- Seven historical FFmpeg-FLAC AVI archives passed complete verification against their MOV originals.
+- Independent FFmpeg decoding matched normalized original PCM and decoded video for all 28 new outputs. AVI/MKV video and audio packet payloads matched in all 14 pairs. Unavailable/invalid/conflicting codec requests were rejected without output creation. Summary: results/portability-crosscheck.json.
+
+Library preparation now pins libFLAC at 1507800de4b70e21be71f38caa0d9079d0bc6e45; build packaging copies FLAC and PicoSHA2 licenses. The MSVC libFLAC target force-includes stdlib.h to supply missing allocation declarations in upstream win_utf8_io.c without editing downloaded sources. No commit or push was performed.

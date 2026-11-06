@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
 project(mjxl VERSION 0.1.0 LANGUAGES C CXX)
 
-if(NOT WIN32)
-    message(FATAL_ERROR "This CMake entry point builds the Windows tools. On Linux, use make -C native.")
+option(MJXL_BUILD_TESTS "Build portable codec/archive regression checks" OFF)
+if(MJXL_BUILD_TESTS)
+    enable_testing()
 endif()
 
 add_subdirectory(native)

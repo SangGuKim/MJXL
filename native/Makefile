@@ -2,7 +2,7 @@
 # The DirectShow filter and the Media Foundation decoder are Windows only.
 #
 # Ubuntu packages:
-#   sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev \
+#   sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev \
 #       libavformat-dev libavcodec-dev libavutil-dev
 
 CXX ?= g++
@@ -10,8 +10,8 @@ PKG_CONFIG ?= pkg-config
 BUILD_DIR ?= ../_build/linux
 OUTPUT_DIR ?= ../dist/linux
 
-PACKAGES := libjxl libjxl_threads libavformat libavcodec libavutil libbrotlienc libbrotlidec
-SOURCES := encoder.cpp cli.cpp core.cpp flac_audio.cpp original_file.cpp
+PACKAGES := libjxl libjxl_threads flac libavformat libavcodec libavutil libbrotlienc libbrotlidec
+SOURCES := encoder.cpp container.cpp cli.cpp audio_policy.cpp core.cpp flac_audio.cpp original_file.cpp
 OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 TARGET := $(OUTPUT_DIR)/mjxl
 

@@ -14,7 +14,7 @@ That is why a saving of around 16% can still be useful: it is space recovered wh
 
 MJXL is an experimental project name and FourCC, not a standardized video codec. Artifact cleanup would change the image and belongs in a separate derived viewing copy; it is not part of the reversible archive path.
 
-**This is a CMake project on Windows.** Start with the root `CMakeLists.txt`. Visual Studio solutions and projects are generated locally and are not stored in Git. Linux builds the CLI with `native/Makefile`.
+**This is a CMake project on Windows.** Start with the root `CMakeLists.txt`. Visual Studio solutions and projects are generated locally and are not stored in Git. Linux retains `native/Makefile`; root CMake also has a system-library path for Linux/macOS, not yet validated on those platforms.
 
 ## Windows: configure, build, and install
 
@@ -59,7 +59,7 @@ $mjxl = '.\dist\Release\mjxl.exe'
 
 FLAC storage supports 8/16/24-bit PCM; 32-bit PCM remains PCM. Input audio must be PCM, or FLAC with MJXL metadata; other codecs are rejected with or without `--copy-audio`. Original 8-bit PCM is stored in the upper byte of 16-bit FLAC and reconstructed exactly using the AVI's audio metadata. Effort accepts 1–10 and defaults to 7; higher settings are not guaranteed to produce smaller files. Options follow the command. Run `mjxl --help` or `mjxl encode --help` for details.
 
-After successful encoding and verification, a summary shows original bytes, stored bytes, and reduction percentages separately for audio, video, container/recovery data, and the complete file. Audio/video rows count stream payloads; the container/recovery row includes headers, indexes, padding, and original-file recovery information. The total includes all of these costs. Negative reduction means growth; a zero-byte baseline is shown as `n/a`.
+After successful encoding and verification, a summary separates audio, video, recovery payload, and pure container bytes. Headers, indexes, padding and recovery wrappers belong to the container row; the recovery row counts only the stored recovery payload and has an original baseline of zero. The four rows sum to the complete file on both sides. Negative reduction means growth; a zero-byte baseline is shown as `n/a`.
 
 `encode` selects the container from `.avi` or `.mkv` (case-insensitive) and rejects other output extensions. MKV uses FFmpeg's Matroska muxer and `V_MS/VFW/FOURCC` with `MJXL`; original-file recovery is stored in the `mjxl-original.bin` attachment with MIME type `application/x-mjxl-original`. FLAC tracks retain the original PCM depth in `MJXL_ORIGINAL_BITS` metadata. `verify`, `restore-original`, and `bench` accept either container; `restore` always writes MJPEG AVI and requires `.avi`. The compressed media payloads are the same for the same input and effort, but container overhead differs. In the four tested samples, MKV was 970–21,638 bytes larger than AVI; smaller overhead is not guaranteed.
 
@@ -82,7 +82,7 @@ The user's earlier PotPlayer codec-selection problem was resolved by clearing th
 The CLI uses a C++20 compiler and system FFmpeg, libjxl, and Brotli libraries. Ubuntu 24.04 WSL2 x86-64 with GCC 13 was verified. DirectShow and MFT are Windows-only components.
 
 ```bash
-sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg
+sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg
 make -C native -j4
 mkdir -p results
 ./dist/linux/mjxl encode input.mov results/output.avi
@@ -96,6 +96,8 @@ ffmpeg -v error -xerror -c:v libjxl -i results/output.avi -map 0:v:0 -map '0:a:0
 Build on the target distribution: the binary dynamically links system libraries, and compression sizes can vary by libjxl version. Check `ffmpeg -decoders` for `libjxl`. Put `-c:v libjxl` before FFmpeg's `-i`; ffplay uses `-vcodec libjxl`. These commands decode pixels, not the original JPEG file bytes. No FFmpeg FourCC mapping or GStreamer plugin is added.
 
 ## Planned playback support
+
+See the [portability and container implementation plan](doc/PORTABILITY-PLAN.md) for FFmpeg removal, MOV, GStreamer, and staged macOS support.
 
 Future work includes GStreamer (`gst`) integration and playback on macOS. Neither is implemented or validated yet. These plans aim to make the same reversible archives usable beyond the current Windows DirectShow and Linux FFmpeg paths; they are not a claim that existing macOS players can open MJXL today.
 
@@ -113,4 +115,17 @@ Existing records cover seven samples / 1,332 frames, exact JPEG and PCM restorat
 
 Sources and build definitions belong in Git. Samples, results, `_deps`, `_build`, `dist`, generated `.sln`/`.slnx`/`.vcxproj` files, and signing certificates do not.
 
-Source comments, script messages, and default documents are English. Korean document companions use `.ko.md`. Exact stored PCM does not guarantee artifact-free player output: PotPlayer clicked periodically on PCM AVIs written with an 18-byte `strf`. The writer now uses a 16-byte `strf`; AVIs encoded earlier keep the old header until they are re-encoded.
+Public header comments use English Doxygen; C/C++ implementation comments use Korean. Script messages and default documents use English. Korean document companions use `.ko.md`. Exact stored PCM does not guarantee artifact-free player output: PotPlayer clicked periodically on PCM AVIs written with an 18-byte `strf`. The writer now uses a 16-byte `strf`; AVIs encoded earlier keep the old header until they are re-encoded.
+
+
+The first portability increment uses libFLAC 1.5.0 for audio and PicoSHA2 for archive hashes; the CLI still requires FFmpeg for container input and MKV output. `--audio-codec auto|flac|copy` selects the current audio path; `--copy-audio` remains an alias for copy. Explicit unsupported formats and conflicting options fail. The parser recognizes `alac`, but the backend is not implemented and rejects it without creating an output. MOV output remains unavailable.
+
+Portable library checks can be built without the FFmpeg SDK:
+
+```powershell
+cmake -S . -B _build/portable-codecs -DMJXL_BUILD_CLI=OFF -DMJXL_BUILD_WINDOWS_ADAPTERS=OFF -DMJXL_BUILD_TESTS=ON
+cmake --build _build/portable-codecs --config Release --target mjxl_portability_test
+ctest --test-dir _build/portable-codecs -C Release --output-on-failure
+```
+
+Windows uses dependencies prepared by `native/prepare_deps.ps1`. The system-library CMake path requires libjxl, Brotli and libFLAC development packages; building the transitional CLI additionally requires FFmpeg development libraries.

@@ -1,0 +1,40 @@
+{
+  "description": "User-supplied samples; media files are not distributed. SHA-256 identifies the exact baseline input.",
+  "fixtures": [
+    {
+      "source": "samples/IMG_20040318_225819.MOV",
+      "bytes": 1301421,
+      "sha256": "0d015a314f1ce475984a5296b79621065a2be0963c4d4b744dd13c25fb5aeeb1"
+    },
+    {
+      "source": "samples/IMG_20040320_230212.MOV",
+      "bytes": 7889241,
+      "sha256": "4b3f56dc74c13b2b1d76739d7529d29fc35fa185144576bad0690424dc6fdc08"
+    },
+    {
+      "source": "samples/IMG_20040321_000945.MOV",
+      "bytes": 3537817,
+      "sha256": "6f8021adec4e9ed42da380bfb19dfc202d98eb130d84819265df15234d285696"
+    },
+    {
+      "source": "samples/IMG_20040322_025026.MOV",
+      "bytes": 8014661,
+      "sha256": "1f774fc5b559e1d7c943e684a6022c17f44656a8b1365b378384297f96a710be"
+    },
+    {
+      "source": "samples/IMG_20040325_190603.MOV",
+      "bytes": 6355373,
+      "sha256": "9ab3b6fc9d52c301ddb0145f7356cf73129eb729176a3710d16f4c9c5d9ceeaf"
+    },
+    {
+      "source": "samples/IMG_20040326_055048.MOV",
+      "bytes": 6529405,
+      "sha256": "5ecaeef8cd0b230ae15dd10a679c7b8c93784fd580fa608640ef875e9a6cbb78"
+    },
+    {
+      "source": "samples/IMG_20060430_203434.MOV",
+      "bytes": 27003974,
+      "sha256": "54b4f5d5a8894c08236d7721c7a35b4b39e2d000e93f56a28a653b9cc82b686b"
+    }
+  ]
+}

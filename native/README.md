@@ -31,7 +31,7 @@ libjxl 0.11.2 and its required dependencies are built statically from `_deps/lib
 The standalone CLI uses GCC or Clang and system FFmpeg, libjxl, and Brotli. DirectShow and Media Foundation components are Windows-only. The executable is written to `dist/linux/mjxl`.
 
 ```bash
-sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat-dev libavcodec-dev libavutil-dev
+sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev
 make -C native
 mkdir -p results
 ./dist/linux/mjxl encode input.mov results/output.avi
@@ -71,7 +71,7 @@ If packet positions or bytes prevent exact reconstruction, encoding fails. `--no
 
 ### FLAC audio
 
-FLAC storage is the default; `--copy-audio` keeps the source PCM instead. It uses the FFmpeg FLAC encoder. In the recorded samples, audio shrank about 34%, but total AVI savings improved by only about 0.365%. The FFmpeg encoder accepts s16/s32 input, so original 8-bit PCM is stored in the upper byte of 16-bit FLAC. Original PCM depth is recorded in an `mjxa` chunk inside `hdrl`. Original 24-bit PCM remains 24-bit FLAC; 32-bit PCM remains PCM.
+FLAC storage is the default; `--copy-audio` keeps the source PCM instead. Encoding and decoding now use pinned libFLAC 1.5.0, independently of FFmpeg. Original 8-bit PCM occupies the upper byte of a 16-bit FLAC sample for compatibility; the original depth remains in `mjxa`. PCM24 stays 24-bit FLAC and PCM32 stays PCM. Historical FFmpeg compression measurements are not a benchmark of the new backend.
 
 Both restore commands use this metadata to recover exact original PCM bytes. FLAC AVI without `mjxa` is rejected. Audio equality is a data-preservation check, not a guarantee of artifact-free playback through every player. PCM AVI uses a 16-byte `strf` because PotPlayer clicked periodically on the 18-byte form; see [the work log](../doc/WORKLOG.md).
 

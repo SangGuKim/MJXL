@@ -5,7 +5,7 @@
 
 namespace mjxl {
 namespace {
-enum class Option { CopyAudio, NoOriginal, Effort, Help };
+enum class Option { AudioCodec, CopyAudio, NoOriginal, Effort, Help };
 
 struct OptionSpec {
     Option id;
@@ -23,8 +23,9 @@ struct CommandSpec {
     std::vector<Option> options;
 };
 
-// Keep command and option definitions in these tables so parsing and help stay consistent.
+// 파싱과 도움말이 일치하도록 명령과 옵션을 공통 표에 정의한다.
 const std::vector<OptionSpec> kOptions = {
+    {Option::AudioCodec, "", "--audio-codec", "--audio-codec <codec>", "Audio codec: auto, flac, alac or copy (ALAC backend not yet available)"},
     {Option::CopyAudio, "", "--copy-audio", "--copy-audio", "Copy the source audio unchanged instead of storing it as lossless FLAC"},
     {Option::NoOriginal, "", "--no-original", "--no-original", "Do not require data to restore the original file"},
     {Option::Effort, "-e", "--effort", "-e, --effort <1-10>", "JPEG XL encoder effort (default: 7)"},
@@ -32,7 +33,7 @@ const std::vector<OptionSpec> kOptions = {
 };
 
 const std::vector<CommandSpec> kCommands = {
-    {"encode", "<input> <output.avi|output.mkv>", 2, "Compress an MJPEG video into MJXL AVI or MKV (selected by extension) and verify it", {Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
+    {"encode", "<input> <output.avi|output.mkv>", 2, "Compress an MJPEG video into MJXL AVI or MKV (selected by extension) and verify it", {Option::AudioCodec, Option::CopyAudio, Option::NoOriginal, Option::Effort, Option::Help}},
     {"verify", "<original> <encoded>", 2, "Compare an MJXL AVI or MKV with its original file", {Option::NoOriginal, Option::Help}},
     {"restore-original", "<encoded> <output>", 2, "Rebuild the original file byte for byte", {Option::Help}},
     {"restore", "<encoded> <output.avi>", 2, "Write the original JPEG frames and PCM as an MJPEG AVI", {Option::Help}},
@@ -107,6 +108,7 @@ CommandLine parse_command_line(const std::vector<std::string>& arguments)
     result.command = first;
 
     bool optionsEnded = false;
+    bool audioSelected = false;
     for (size_t i = 1; i < arguments.size(); ++i) {
         const std::string& argument = arguments[i];
         if (optionsEnded || !argument.starts_with('-') || argument == "-") {
@@ -117,7 +119,7 @@ CommandLine parse_command_line(const std::vector<std::string>& arguments)
             optionsEnded = true;
             continue;
         }
-        // Split --name=value into its name and value before looking it up in the table.
+        // --name=value를 이름과 값으로 나눈 뒤 옵션 표에서 조회한다.
         const size_t equals = argument.starts_with("--") ? argument.find('=') : std::string::npos;
         const std::string name = argument.substr(0, equals);
         const auto found = std::find_if(command->options.begin(), command->options.end(), [&](Option id) {
@@ -127,15 +129,40 @@ CommandLine parse_command_line(const std::vector<std::string>& arguments)
         if (found == command->options.end()) {
             throw UsageError("Unknown option for " + std::string(command->name) + ": " + name);
         }
-        if (*found != Option::Effort && equals != std::string::npos) {
+        if (*found != Option::Effort && *found != Option::AudioCodec && equals != std::string::npos) {
             throw UsageError("Option does not take a value: " + name);
         }
         if (*found == Option::Help) {
             result.help = true;
         } else if (*found == Option::CopyAudio) {
-            result.copyAudio = true;
+            if (audioSelected && result.audioCodec != AudioCodec::Copy) {
+                throw UsageError("Conflicting audio codec options");
+            }
+            result.audioCodec = AudioCodec::Copy;
+            audioSelected = true;
         } else if (*found == Option::NoOriginal) {
             result.noOriginal = true;
+        } else if (*found == Option::AudioCodec) {
+            std::string value;
+            if (equals != std::string::npos) {
+                value = argument.substr(equals + 1);
+            } else {
+                if (++i >= arguments.size()) {
+                    throw UsageError("--audio-codec requires auto, flac, alac or copy");
+                }
+                value = arguments[i];
+            }
+            AudioCodec codec;
+            try {
+                codec = parse_audio_codec(value);
+            } catch (const std::invalid_argument& error) {
+                throw UsageError(error.what());
+            }
+            if (audioSelected && result.audioCodec != codec) {
+                throw UsageError("Conflicting audio codec options");
+            }
+            result.audioCodec = codec;
+            audioSelected = true;
         } else if (equals != std::string::npos) {
             result.effort = parse_effort(argument.substr(equals + 1));
         } else {

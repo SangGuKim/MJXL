@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 
@@ -12,6 +13,7 @@ def main():
     parser.add_argument('--samples', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--compatible-avi', type=Path)
+    parser.add_argument('--effort', type=int, choices=range(1, 11), default=7)
     parser.add_argument('--container', choices=('avi', 'mkv'), default='avi')
     args = parser.parse_args()
     binary = args.binary.resolve()
@@ -34,7 +36,19 @@ def main():
             folder.mkdir(exist_ok=True)
             encoded = folder / (source.stem + '.' + args.container)
             restored = folder / (source.stem + '.restored.mov')
-            run('encode', source, encoded, *(['--copy-audio'] if mode == 'pcm' else []))
+            summary = run('encode', source, encoded, '--effort', args.effort,
+                          '--audio-codec', 'copy' if mode == 'pcm' else 'flac')
+            components = {}
+            for label in ('Audio', 'Video', 'Recovery payload', 'Container', 'Total file'):
+                match = re.search(r'^' + re.escape(label) + r'\s+([\d,]+)\s+->\s+([\d,]+)', summary, re.MULTILINE)
+                if not match:
+                    raise RuntimeError(f'Missing size component {label}: {summary}')
+                components[label] = [int(value.replace(',', '')) for value in match.groups()]
+            if any(sum(components[label][side] for label in ('Audio', 'Video', 'Recovery payload', 'Container'))
+                   != components['Total file'][side] for side in (0, 1)):
+                raise RuntimeError(f'Component totals differ: {components}')
+            if components['Total file'] != [source.stat().st_size, encoded.stat().st_size]:
+                raise RuntimeError('Reported file sizes differ from disk')
             verification = run('verify', source, encoded)
             run('restore-original', encoded, restored)
             if hashlib.sha256(restored.read_bytes()).hexdigest() != digest:
@@ -42,7 +56,7 @@ def main():
             # Remove comparison restore files after verification; retain encoded files and reports.
             restored.unlink()
             records.append(dict(source=source.name, mode=mode, original_bytes=source.stat().st_size,
-                                container=args.container, encoded_bytes=encoded.stat().st_size, sha256=digest, verification=verification))
+                                container=args.container, components=components, effort=args.effort, encoded_bytes=encoded.stat().st_size, sha256=digest, verification=verification))
             print(f'PASS {mode}: {source.name}', flush=True)
     if args.compatible_avi:
         verification = run('verify', sources[0], args.compatible_avi)

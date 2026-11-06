@@ -59,7 +59,7 @@ $mjxl = '.\dist\Release\mjxl.exe'
 
 FLAC 저장은 8/16/24비트 PCM을 지원하며 32비트 PCM은 PCM으로 둔다. 입력 음성은 PCM이거나 MJXL 메타데이터가 있는 FLAC이어야 하며, 다른 코덱은 `--copy-audio` 여부와 관계없이 거부한다. 원래 8비트 PCM은 16비트 FLAC의 상위 바이트에 저장하고 AVI 음성 메타데이터로 정확히 복원한다. 압축 강도는 1~10이고 기본값은 7이다. 높다고 항상 더 작은 파일이 되지는 않는다. 옵션은 명령 뒤에 쓴다. 상세한 규칙은 `mjxl --help`와 `mjxl encode --help`를 참고한다.
 
-인코딩과 검증이 성공하면 음성·영상·컨테이너/복원 정보·파일 전체에 대해 원본 바이트 수, 저장 바이트 수, 절감률을 표로 표시한다. 음성·영상은 스트림 데이터만 계산하고, 컨테이너/복원 정보에는 헤더·인덱스·패딩·원본 복원 정보가 포함된다. 전체 크기는 이 비용을 모두 포함한다. 절감률이 음수이면 크기가 늘어난 것이며, 원본이 0바이트이면 `n/a`로 표시한다.
+인코딩과 검증이 성공하면 음성·영상·복원 payload·순수 컨테이너의 크기를 나누어 출력한다. 헤더·인덱스·정렬 패딩과 복원 데이터 wrapper는 컨테이너 항목에 포함하고 복원 payload 자체는 별도로 센다. 원본의 복원 payload 기준은 0이며 네 항목의 합은 전체 파일 크기와 일치한다. 감소율이 음수이면 커진 것이고 기준 크기가 0이면 `n/a`로 표시한다.
 
 `encode`는 출력 확장자 `.avi` 또는 `.mkv`로 컨테이너를 선택하며 대소문자는 구분하지 않는다. 다른 출력 확장자는 거부한다. MKV는 FFmpeg의 Matroska 작성기로 `V_MS/VFW/FOURCC`와 `MJXL`을 기록하며, 원본 복원 정보는 MIME 형식이 `application/x-mjxl-original`인 `mjxl-original.bin` 첨부 데이터에 보관한다. FLAC 트랙의 `MJXL_ORIGINAL_BITS` 메타데이터에 원래 PCM 비트 깊이를 남긴다. `verify`·`restore-original`·`bench`는 두 컨테이너를 모두 읽는다. `restore`는 항상 MJPEG AVI를 쓰며 `.avi` 확장자가 필요하다. 같은 입력과 압축 강도에서 미디어 데이터는 같지만 컨테이너 비용은 다르다. 검사한 샘플 4개에서는 MKV가 AVI보다 970~21,638바이트 컸으며, 더 작은 컨테이너 비용을 보장하지 않는다.
 
@@ -82,7 +82,7 @@ MOV 샘플 4개의 두 음성 모드에서 MKV 변환, 원본 파일 전체 복�
 CLI는 C++20 컴파일러와 시스템 FFmpeg·libjxl·Brotli를 사용한다. Ubuntu 24.04 WSL2 x86-64와 GCC 13에서 검증했다. DirectShow와 MFT는 Windows 전용이다.
 
 ```bash
-sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg
+sudo apt install build-essential pkg-config libjxl-dev libbrotli-dev libflac-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg
 make -C native -j4
 mkdir -p results
 ./dist/linux/mjxl encode input.mov results/output.avi
@@ -113,4 +113,19 @@ GStreamer(`gst`) 연동과 macOS 재생 지원을 추진할 계획이다. 둘 �
 
 소스와 빌드 정의는 Git에서 관리한다. 샘플·결과·`_deps`·`_build`·`dist`·생성된 `.sln`/`.slnx`/`.vcxproj`·서명 인증서는 넣지 않는다.
 
-소스 주석·스크립트 메시지·기본 문서는 영어로 작성한다. 한국어 문서는 `.ko.md`로 제공한다. 저장된 PCM이 정확해도 플레이어 출력까지 보장되지는 않는다. 팟플레이어는 18바이트 `strf`로 작성된 PCM AVI에서 주기적인 잡음을 냈다. 작성기는 이제 16바이트 `strf`를 쓰며, 이전에 만든 AVI는 다시 인코딩하기 전까지 기존 헤더를 유지한다.
+공개 헤더 주석은 영어 Doxygen으로, C/C++ 구현 주석은 한국어로 작성한다. 스크립트 메시지와 기본 문서는 영어로 작성한다. 한국어 문서는 `.ko.md`로 제공한다. 저장된 PCM이 정확해도 플레이어 출력까지 보장되지는 않는다. 팟플레이어는 18바이트 `strf`로 작성된 PCM AVI에서 주기적인 잡음을 냈다. 작성기는 이제 16바이트 `strf`를 쓰며, 이전에 만든 AVI는 다시 인코딩하기 전까지 기존 헤더를 유지한다.
+
+FFmpeg 의존성 제거, MOV 입출력, GStreamer와 macOS 지원의 설계 및 단계별 완료 기준은 [이식성과 컨테이너 구현 계획](doc/PORTABILITY-PLAN.ko.md)에 정리한다.
+
+
+첫 이식성 구현은 오디오에 libFLAC 1.5.0, 복원 hash에 PicoSHA2를 사용한다. CLI의 컨테이너 읽기와 MKV 쓰기는 아직 FFmpeg가 필요하다. `--audio-codec auto|flac|copy`로 현재 오디오 경로를 선택하며 `--copy-audio`는 copy의 호환 별칭이다. 명시한 코덱의 미지원 형식과 상충 옵션은 오류로 처리한다. `alac`은 파서만 인식하고 backend 미구현 오류로 거부하며 출력 파일은 만들지 않는다. MOV 출력은 아직 제공하지 않는다.
+
+FFmpeg SDK 없이 공통 라이브러리를 검사하는 방법은 다음과 같다.
+
+```powershell
+cmake -S . -B _build/portable-codecs -DMJXL_BUILD_CLI=OFF -DMJXL_BUILD_WINDOWS_ADAPTERS=OFF -DMJXL_BUILD_TESTS=ON
+cmake --build _build/portable-codecs --config Release --target mjxl_portability_test
+ctest --test-dir _build/portable-codecs -C Release --output-on-failure
+```
+
+Windows 의존성은 `native/prepare_deps.ps1`로 준비한다. system-library CMake 경로는 libjxl·Brotli·libFLAC 개발 패키지가 필요하며 전환 중인 CLI에는 FFmpeg 개발 라이브러리도 필요하다.

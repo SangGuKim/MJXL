@@ -156,3 +156,21 @@ CLI의 MOV 출력은 **구현하지 않았다**. `.mov`는 여전히 거부한�
 ### 후속 요청: 소스 체크포인트 저장
 
 사용자가 다른 PC에서 이어갈 수 있도록 오늘 소스·문서의 커밋과 푸시를 추가 요청했다. 앞의 미커밋·미푸시 상태는 이 요청 이전 기록이다. 이 체크포인트에는 소스와 문서만 포함하며 샘플·시험 영상·의존성·빌드 결과는 로컬에만 있고 Git에서 제외한다. 다른 PC에서는 `main`을 가져온 뒤 의존성을 준비하고 재빌드한 다음 설치한다. `C:/Temp`의 MOV 시험본이나 무시된 `results` 파일이 그 PC에도 있다고 가정하지 않는다. 오늘 추가 구현은 진행하지 않는다.
+
+## 2026-11-06: 이식성 첫 구현
+
+음성·영상·복원 payload·순수 컨테이너의 네 항목 통계와 총합 검사, native/testdata의 fixture SHA-256 목록을 추가했다. 원본 복원 payload는 version 1을 유지한다. SHA-256은 FFmpeg 대신 출처를 고정한 PicoSHA2(MIT), FLAC 인코딩·디코딩은 libFLAC 1.5.0을 사용한다. 최종 STREAMINFO와 기존 PCM8 표현을 유지하고 callback 예외를 C ABI 밖으로 전파하지 않는다. 손상 CRC와 잘린 패킷은 거부하며 원본 전체 SHA-256 검증도 유지한다.
+
+컨테이너 구현을 container.cpp로 옮기고 FFmpeg 타입을 노출하지 않는 container.hpp를 추가했다. CMake에 코어·오디오·아카이브·컨테이너 타깃, 선택적 Windows 어댑터와 공통 테스트, Linux/macOS system-package 경로를 구성했다. Linux/macOS 경로는 해당 플랫폼에서 아직 검증하지 않았다. CLI 컨테이너 backend는 여전히 FFmpeg가 필요하며 MOV/ALAC·GStreamer·자체 컨테이너 대체·macOS 앱과 확장은 미구현이다.
+
+--audio-codec auto|flac|alac|copy와 기존 --copy-audio 별칭을 연결했다. AVI/MKV auto는 지원 PCM에 FLAC을 사용하고 PCM32는 복사한다. 명시적 FLAC 미지원 형식, 상충 옵션과 ALAC backend 미구현 요청은 오류로 처리한다. AVI ALAC 실험 스위치와 외부 FFmpeg backend는 아직 노출하지 않는다.
+
+Windows x64 / VS2026 v145 검증 결과는 다음과 같다.
+
+- 기존 DirectShow/MFT를 포함한 Release 빌드에 성공했다. 재생·등록 재검사는 아니며 설치와 등록은 수행하지 않았다. 실행 파일은 dist/Release에 있다.
+- CLI와 Windows 어댑터를 끈 별도 구성의 CTest에 성공했다. PCM8/16/24, 1/2/8채널, 8040/44100/48000 Hz, 1/5003샘플의 54개 FLAC 조합과 손상·잘림 거부, 정책·CLI 충돌, SHA-256 known answer, 아카이브 무결성을 검사했다. 테스트 실행 파일의 import는 KERNEL32.dll뿐이며 FFmpeg DLL에 의존하지 않는다.
+- 실제 카메라 MOV 7개를 AVI/MKV와 PCM/FLAC의 28개 조합으로 새로 인코딩하고 미디어 검증, 물리 원본 복원과 SHA-256 비교, 네 항목 총합 검사를 통과했다. 컨테이너별 MJPEG 복원과 첫 샘플 RGB bench도 통과했다. 회귀 검사에는 effort 1을 사용했으므로 압축률 benchmark가 아니다. 결과는 results/portability-v1-avi와 results/portability-v1-mkv에 있다.
+- 과거 FFmpeg FLAC AVI 7개도 원본 MOV와 전체 복원 검증을 통과했다.
+- 새 출력 28개는 독립 FFmpeg 디코딩에서 원본과 정규화 PCM이 일치했고 영상 디코딩도 통과했다. AVI/MKV의 영상·음성 payload 14쌍은 각각 동일했다. 미구현·잘못된·상충 codec 옵션은 출력 파일 생성 없이 거부했다. 요약은 results/portability-crosscheck.json에 있다.
+
+libFLAC 버전은 1507800de4b70e21be71f38caa0d9079d0bc6e45로 고정하고 FLAC·PicoSHA2 라이선스를 배포 폴더에 복사한다. libFLAC 1.5.0의 win_utf8_io.c에 빠진 할당 함수 선언은 MSVC 타깃의 stdlib.h 강제 include로 보완하며 다운로드한 소스는 변경하지 않는다. 커밋과 push는 수행하지 않았다.
